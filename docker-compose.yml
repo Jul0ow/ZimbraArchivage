@@ -1,0 +1,41 @@
+# Lancement rapide pour tester l'application :
+#   cp .env.example .env    # puis renseigner les URLs du serveur Zimbra
+#   docker compose up -d    # images publiées ; ajouter --build pour construire depuis les sources
+#   ouvrir http://localhost:3000/
+name: zimbra-archivage
+
+services:
+  backend:
+    image: ghcr.io/jul0ow/zimbraarchivage-backend:${ARCHIVAGE_VERSION:-latest}
+    build: ./backend
+    environment:
+      ZIMBRA_SOAP_URL: ${ZIMBRA_SOAP_URL:?Renseigner ZIMBRA_SOAP_URL dans .env}
+      ZIMBRA_REST_URL: ${ZIMBRA_REST_URL:?Renseigner ZIMBRA_REST_URL dans .env}
+      VERIFY_TLS: ${VERIFY_TLS:-true}
+      ZONE_ID: ${ZONE_ID:-Europe/Paris}
+      # L'application est servie en HTTP sur le poste : le cookie ne peut pas être Secure
+      COOKIE_SECURE: "false"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/jul0ow/zimbraarchivage-frontend:${ARCHIVAGE_VERSION:-latest}
+    build: ./frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "${ARCHIVAGE_PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /app/.next/cache
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

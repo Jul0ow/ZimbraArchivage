@@ -63,6 +63,20 @@ Le mot de passe n'est jamais stocké : seul le jeton Zimbra est conservé, dans 
 `HttpOnly`, `SameSite=Lax` et `Secure` (par défaut), limité au chemin `/api`. La session dure
 le temps de vie du jeton Zimbra.
 
+## Test rapide avec Docker Compose
+
+```bash
+cp .env.example .env     # renseigner ZIMBRA_SOAP_URL et ZIMBRA_REST_URL
+docker compose up -d     # utilise les images publiées sur GHCR
+```
+
+Puis ouvrir http://localhost:3000/. Options utiles dans `.env` : `ARCHIVAGE_VERSION`
+(version des images, `latest` par défaut), `ARCHIVAGE_PORT` (port local, `3000` par défaut)
+et `VERIFY_TLS=false` si le certificat du serveur Zimbra est interne ou auto-signé.
+
+Pour tester les sources du dépôt plutôt que les images publiées :
+`docker compose up -d --build`. Arrêt : `docker compose down`.
+
 ## Configuration du backend
 
 Variables d'environnement (voir `backend/.env.example`) :
