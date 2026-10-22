@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "zimbra-archivage.backendName" . }}
+  labels:
+    {{- include "zimbra-archivage.labels" . | nindent 4 }}
+data:
+  ZIMBRA_SOAP_URL: {{ required "zimbra.soapUrl est obligatoire" .Values.zimbra.soapUrl | quote }}
+  ZIMBRA_REST_URL: {{ required "zimbra.restUrl est obligatoire" .Values.zimbra.restUrl | quote }}
+  VERIFY_TLS: {{ .Values.zimbra.verifyTls | quote }}
+  ZONE_ID: {{ .Values.config.zoneId | quote }}
+  SEARCH_BATCH_SIZE: {{ .Values.config.searchBatchSize | quote }}
+  MAX_FILE_NAME_LENGTH: {{ .Values.config.maxFileNameLength | quote }}
+  HTTP_TIMEOUT: {{ .Values.config.httpTimeout | quote }}
+  COOKIE_SECURE: {{ .Values.config.cookieSecure | quote }}

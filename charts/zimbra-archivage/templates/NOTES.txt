@@ -1,0 +1,15 @@
+Archivage Zimbra est déployé.
+{{- if .Values.ingress.enabled }}
+
+Application : http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- else }}
+
+Pour y accéder localement :
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "zimbra-archivage.frontendName" . }} 3000:{{ .Values.frontend.port }}
+puis ouvrir http://localhost:3000/
+{{- if .Values.config.cookieSecure }}
+
+Attention : config.cookieSecure=true, la connexion ne fonctionne qu'en HTTPS
+(les navigateurs acceptent toutefois les cookies Secure sur http://localhost).
+{{- end }}
+{{- end }}

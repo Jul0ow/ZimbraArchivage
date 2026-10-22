@@ -1,0 +1,6 @@
+apiVersion: v2
+name: zimbra-archivage
+description: Application web de téléchargement en ZIP des dossiers d'une boîte Zimbra
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

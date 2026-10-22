@@ -1,0 +1,83 @@
+zimbra:
+  # URL de l'API SOAP, de la forme https://domaine.com/service/soap
+  soapUrl: ""
+  # URL de l'API ReST, de la forme https://domaine.com/service
+  restUrl: ""
+  # Vérifier le certificat TLS du serveur Zimbra
+  verifyTls: true
+
+config:
+  # Fuseau horaire des filtres de dates et du nommage des fichiers .eml
+  zoneId: Europe/Paris
+  # Nombre de messages par page de recherche Zimbra
+  searchBatchSize: 500
+  # Longueur maximale des noms de fichiers .eml (entre 50 et 180)
+  maxFileNameLength: 50
+  # Délai maximal d'un appel vers Zimbra, en secondes
+  httpTimeout: 120
+  # Cookie de session réservé à HTTPS : à ne désactiver que sans TLS
+  cookieSecure: true
+
+backend:
+  replicaCount: 1
+  image:
+    repository: zimbra-archivage-backend
+    tag: ""
+    pullPolicy: IfNotPresent
+  port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: zimbra-archivage-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+imagePullSecrets: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: false
+  className: ""
+  annotations:
+    # Exports volumineux : pas de mise en tampon et délai de lecture étendu (ingress-nginx)
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  host: archivage.example.fr
+  tls: []
+  #  - secretName: archivage-tls
+  #    hosts:
+  #      - archivage.example.fr
