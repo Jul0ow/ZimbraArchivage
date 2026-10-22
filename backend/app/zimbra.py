@@ -4,6 +4,7 @@ Reprend les échanges du projet Archivage (ZimbraService) :
 AuthRequest, GetFolderRequest, SearchRequest et téléchargement des .eml en ReST.
 """
 
+import re
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -20,6 +21,23 @@ MAX_TRY = 5
 
 # Vues Zimbra des dossiers contenant des courriels (les dossiers sans vue sont des dossiers de mails)
 MAIL_VIEWS = {None, "", "message", "conversation"}
+
+# Palette des couleurs prédéfinies de Zimbra, indexée par l'attribut "color" d'un dossier
+# (0 = couleur par défaut) : bleu, cyan, vert, violet, rouge, jaune, rose, gris, orange
+ZIMBRA_COLORS = [
+    None,
+    "#5B9BF2",
+    "#43EDED",
+    "#6ACB9E",
+    "#BA86E5",
+    "#F66666",
+    "#F8FA33",
+    "#FE98D3",
+    "#BABABA",
+    "#FF9B27",
+]
+
+RGB_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 HUMAN_NAMES = {
     "1": "Racine",
@@ -63,6 +81,8 @@ class Folder:
     abs_folder_path: str
     view: str | None = None
     message_count: int = 0
+    # Couleur du dossier au format #RRGGBB, None pour la couleur par défaut
+    color: str | None = None
     children: list["Folder"] = field(default_factory=list)
 
     @property
@@ -100,6 +120,18 @@ def _content(value: Any) -> str:
     return "" if value is None else str(value)
 
 
+def _folder_color(data: dict[str, Any]) -> str | None:
+    """Couleur personnalisée (attribut rgb) en priorité, sinon couleur prédéfinie (attribut color)."""
+    rgb = data.get("rgb")
+    if isinstance(rgb, str) and RGB_PATTERN.match(rgb):
+        return rgb.upper()
+    try:
+        index = int(data.get("color", 0))
+    except (TypeError, ValueError):
+        return None
+    return ZIMBRA_COLORS[index] if 0 <= index < len(ZIMBRA_COLORS) else None
+
+
 def _parse_folder(data: dict[str, Any]) -> Folder:
     # Les balises link (partages montés) et search (dossiers de recherche) sont ignorées
     return Folder(
@@ -108,6 +140,7 @@ def _parse_folder(data: dict[str, Any]) -> Folder:
         abs_folder_path=data.get("absFolderPath", "/"),
         view=data.get("view"),
         message_count=int(data.get("n", 0)),
+        color=_folder_color(data),
         children=[_parse_folder(child) for child in data.get("folder", [])],
     )
 

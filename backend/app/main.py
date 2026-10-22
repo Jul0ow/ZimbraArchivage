@@ -67,6 +67,7 @@ class FolderResponse(BaseModel):
     name: str
     path: str
     message_count: int
+    color: str | None
     children: list["FolderResponse"]
 
 
@@ -82,6 +83,7 @@ def to_folder_response(folder: Folder) -> FolderResponse:
         name=folder.human_name,
         path=folder.abs_folder_path,
         message_count=folder.message_count,
+        color=folder.color,
         children=[to_folder_response(c) for c in folder.children if c.is_mail_folder],
     )
 

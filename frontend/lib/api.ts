@@ -7,6 +7,8 @@ export type FolderNode = {
   name: string;
   path: string;
   message_count: number;
+  // Couleur définie dans Zimbra (#RRGGBB), null pour la couleur par défaut
+  color: string | null;
   children: FolderNode[];
 };
 

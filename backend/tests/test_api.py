@@ -106,6 +106,16 @@ def test_folders_only_lists_mail_folders(logged_client: TestClient):
     assert folders[0]["message_count"] == 3
 
 
+def test_folders_colors(logged_client: TestClient):
+    folders = logged_client.get("/api/folders").json()
+
+    inbox, sent = folders
+    # Couleur prédéfinie 5 (rouge), couleur personnalisée prioritaire, pas de couleur
+    assert inbox["color"] == "#F66666"
+    assert inbox["children"][0]["color"] == "#12AB9F"
+    assert sent["color"] is None
+
+
 def test_summary_with_subfolders(logged_client: TestClient):
     response = logged_client.get("/api/export/summary", params={"folder_id": "2"})
 

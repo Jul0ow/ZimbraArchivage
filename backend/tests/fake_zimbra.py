@@ -102,8 +102,9 @@ ROOT = {
             "absFolderPath": "/Inbox",
             "view": "message",
             "n": 3,
+            "color": 5,
             "folder": [
-                {"id": "257", "name": "Projets: 2024", "absFolderPath": "/Inbox/Projets: 2024", "view": "message", "n": 1},
+                {"id": "257", "name": "Projets: 2024", "absFolderPath": "/Inbox/Projets: 2024", "view": "message", "n": 1, "color": 1, "rgb": "#12ab9f"},
             ],
         },
         {"id": "5", "name": "Sent", "absFolderPath": "/Sent", "view": "message", "n": 0},
