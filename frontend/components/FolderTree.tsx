@@ -49,8 +49,11 @@ function FolderItem({
           <span className="tree-toggle" />
         )}
         <button type="button" className="tree-label" onClick={() => onSelect(folder)}>
-          <span>{folder.name}</span>
-          <span className="badge">{folder.message_count}</span>
+          <FolderIcon />
+          <span className="tree-name">{folder.name}</span>
+          <span className="badge" title="Nombre de messages">
+            {folder.message_count}
+          </span>
         </button>
       </div>
       {hasChildren && expanded && (
@@ -61,5 +64,16 @@ function FolderItem({
         </ul>
       )}
     </li>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg className="tree-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.38a1.5 1.5 0 0 1 1.06.44L11.5 7h8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }

@@ -9,12 +9,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <body>
-        <header className="site-header">
-          <span className="site-title">Archivage Zimbra</span>
-        </header>
-        <main className="site-main">{children}</main>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

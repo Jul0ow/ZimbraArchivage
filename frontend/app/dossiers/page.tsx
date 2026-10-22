@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import FolderTree from "@/components/FolderTree";
+import SiteHeader from "@/components/SiteHeader";
 import {
   ApiError,
   type ExportOptions,
@@ -101,119 +102,118 @@ export default function FoldersPage() {
 
   if (!folders) {
     return (
-      <section className="card">
-        {error ? (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        ) : (
-          <p className="muted">Chargement des dossiers…</p>
-        )}
-      </section>
+      <>
+        <SiteHeader username={username} onLogout={handleLogout} />
+        <main className="site-main">
+          <section className="card">
+            {error ? (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            ) : (
+              <p className="muted">Chargement des dossiers…</p>
+            )}
+          </section>
+        </main>
+      </>
     );
   }
 
   return (
     <>
-      <div className="toolbar">
-        <span className="muted">
-          Connecté en tant que <strong>{username}</strong>
-        </span>
-        <button type="button" className="button" onClick={handleLogout}>
-          Se déconnecter
-        </button>
-      </div>
+      <SiteHeader username={username} onLogout={handleLogout} />
+      <main className="site-main">
+        <div className="layout">
+          <section className="card">
+            <h2>Dossiers</h2>
+            <FolderTree
+              folders={folders}
+              selectedId={selected?.id ?? null}
+              onSelect={setSelected}
+            />
+          </section>
 
-      <div className="layout">
-        <section className="card">
-          <h2>Dossiers</h2>
-          <FolderTree
-            folders={folders}
-            selectedId={selected?.id ?? null}
-            onSelect={setSelected}
-          />
-        </section>
-
-        <section className="card">
-          <h2>Export</h2>
-          {!selected ? (
-            <p className="muted">Sélectionnez un dossier à télécharger.</p>
-          ) : (
-            <div className="form">
-              <p>
-                Dossier sélectionné : <strong>{selected.name}</strong>{" "}
-                <span className="muted">({selected.path})</span>
-              </p>
-
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={includeSubfolders}
-                  onChange={(e) => setIncludeSubfolders(e.target.checked)}
-                />
-                Inclure les sous-dossiers
-              </label>
-
-              <fieldset className="dates">
-                <legend>Période (facultatif)</legend>
-                <label>
-                  Du
-                  <input
-                    type="date"
-                    value={start}
-                    max={end || undefined}
-                    onChange={(e) => setStart(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Au
-                  <input
-                    type="date"
-                    value={end}
-                    min={start || undefined}
-                    onChange={(e) => setEnd(e.target.value)}
-                  />
-                </label>
-              </fieldset>
-              {datesInvalid && (
-                <p className="error">La date de début doit précéder la date de fin.</p>
-              )}
-
-              {summary && (
-                <p className="info">
-                  {summary.message_count} message(s) dans {summary.folder_count} dossier(s),{" "}
-                  {formatSize(summary.total_size)} environ.
+          <section className="card">
+            <h2>Export</h2>
+            {!selected ? (
+              <p className="muted">Sélectionnez un dossier à télécharger.</p>
+            ) : (
+              <div className="form">
+                <p>
+                  Dossier sélectionné : <strong>{selected.name}</strong>{" "}
+                  <span className="muted">({selected.path})</span>
                 </p>
-              )}
-              {notice && <p className="info">{notice}</p>}
-              {error && (
-                <p className="error" role="alert">
-                  {error}
-                </p>
-              )}
 
-              <div className="actions">
-                <button
-                  type="button"
-                  className="button"
-                  onClick={handleSummary}
-                  disabled={busy !== null || datesInvalid}
-                >
-                  {busy === "summary" ? "Estimation…" : "Estimer la taille"}
-                </button>
-                <button
-                  type="button"
-                  className="button primary"
-                  onClick={handleDownload}
-                  disabled={busy !== null || datesInvalid}
-                >
-                  Télécharger le ZIP
-                </button>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={includeSubfolders}
+                    onChange={(e) => setIncludeSubfolders(e.target.checked)}
+                  />
+                  Inclure les sous-dossiers
+                </label>
+
+                <fieldset className="dates">
+                  <legend>Période (facultatif)</legend>
+                  <label>
+                    Du
+                    <input
+                      type="date"
+                      value={start}
+                      max={end || undefined}
+                      onChange={(e) => setStart(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Au
+                    <input
+                      type="date"
+                      value={end}
+                      min={start || undefined}
+                      onChange={(e) => setEnd(e.target.value)}
+                    />
+                  </label>
+                </fieldset>
+                {datesInvalid && (
+                  <p className="error">La date de début doit précéder la date de fin.</p>
+                )}
+
+                {summary && (
+                  <p className="info">
+                    {summary.message_count} message(s) dans {summary.folder_count} dossier(s),{" "}
+                    {formatSize(summary.total_size)} environ.
+                  </p>
+                )}
+                {notice && <p className="info">{notice}</p>}
+                {error && (
+                  <p className="error" role="alert">
+                    {error}
+                  </p>
+                )}
+
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={handleSummary}
+                    disabled={busy !== null || datesInvalid}
+                  >
+                    {busy === "summary" ? "Estimation…" : "Estimer la taille"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={handleDownload}
+                    disabled={busy !== null || datesInvalid}
+                  >
+                    Télécharger le ZIP
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-        </section>
-      </div>
+            )}
+          </section>
+        </div>
+      </main>
     </>
   );
 }
