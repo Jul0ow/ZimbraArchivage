@@ -1,13 +1,22 @@
 name: Release
 
-# Publie une version à chaque tag vX.Y.Z : images Docker sur GHCR, chart Helm et release GitHub
+# Publie une version à chaque tag vX.Y.Z, ou à la demande depuis l'onglet Actions :
+# images Docker sur GHCR, chart Helm et release GitHub
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à publier, sans le v (ex. 0.1.0) : le tag est créé par la release"
+        required: true
 
 permissions:
   contents: write
   packages: write
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
 
 jobs:
   test:
@@ -48,7 +57,7 @@ jobs:
         id: meta
         run: |
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -81,14 +90,14 @@ jobs:
 
       - name: Paquet du chart Helm
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           helm package charts/zimbra-archivage --version "$VERSION" --app-version "$VERSION" --destination dist
 
       - name: Création de la release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           cat > notes.md <<NOTES
           ## Images Docker
@@ -121,7 +130,8 @@ jobs:
             --set ingress.enabled=true --set ingress.host=archivage.domaine.fr
           \`\`\`
           NOTES
-          gh release create "$GITHUB_REF_NAME" dist/*.tgz \
-            --title "$GITHUB_REF_NAME" \
+          gh release create "$TAG" dist/*.tgz \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
             --notes-file notes.md \
             --prerelease

@@ -133,7 +133,8 @@ exports volumineux. Voir `charts/zimbra-archivage/values.yaml` pour toutes les o
 
 ## Publier une version
 
-Pousser un tag `vX.Y.Z` déclenche le workflow `.github/workflows/release.yml`, qui :
+Pousser un tag `vX.Y.Z`, ou lancer le workflow « Release » depuis l'onglet Actions
+en indiquant la version, déclenche `.github/workflows/release.yml`, qui :
 
 1. lance les tests du backend et la vérification TypeScript du frontend ;
 2. publie les images `:X.Y.Z` et `:latest` sur GHCR ;
