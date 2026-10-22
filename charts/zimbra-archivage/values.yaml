@@ -21,7 +21,7 @@ config:
 backend:
   replicaCount: 1
   image:
-    repository: zimbra-archivage-backend
+    repository: ghcr.io/jul0ow/zimbraarchivage-backend
     tag: ""
     pullPolicy: IfNotPresent
   port: 8000
@@ -38,7 +38,7 @@ backend:
 frontend:
   replicaCount: 1
   image:
-    repository: zimbra-archivage-frontend
+    repository: ghcr.io/jul0ow/zimbraarchivage-frontend
     tag: ""
     pullPolicy: IfNotPresent
   port: 3000

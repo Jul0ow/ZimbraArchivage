@@ -104,6 +104,9 @@ npm run lint           # vérification TypeScript
 
 ## Images Docker
 
+Les images publiées sont `ghcr.io/jul0ow/zimbraarchivage-backend` et
+`ghcr.io/jul0ow/zimbraarchivage-frontend`. Pour les construire localement :
+
 ```bash
 docker build -t zimbra-archivage-backend:0.1.0 backend
 docker build -t zimbra-archivage-frontend:0.1.0 frontend
@@ -119,8 +122,6 @@ racine en lecture seule (prévoir un volume temporaire sur `/tmp` pour le backen
 helm install archivage charts/zimbra-archivage \
   --set zimbra.soapUrl=https://mail.domaine.fr/service/soap \
   --set zimbra.restUrl=https://mail.domaine.fr/service \
-  --set backend.image.repository=registry.domaine.fr/zimbra-archivage-backend \
-  --set frontend.image.repository=registry.domaine.fr/zimbra-archivage-frontend \
   --set ingress.enabled=true \
   --set ingress.className=nginx \
   --set ingress.host=archivage.domaine.fr
@@ -129,3 +130,16 @@ helm install archivage charts/zimbra-archivage \
 L'ingress route `/api` vers le backend et le reste vers le frontend. Les annotations par
 défaut (ingress-nginx) désactivent la mise en tampon et allongent les délais, pour les
 exports volumineux. Voir `charts/zimbra-archivage/values.yaml` pour toutes les options.
+
+## Publier une version
+
+Pousser un tag `vX.Y.Z` déclenche le workflow `.github/workflows/release.yml`, qui :
+
+1. lance les tests du backend et la vérification TypeScript du frontend ;
+2. publie les images `:X.Y.Z` et `:latest` sur GHCR ;
+3. crée une release GitHub contenant le chart Helm `zimbra-archivage-X.Y.Z.tgz`.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
