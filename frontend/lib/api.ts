@@ -34,6 +34,12 @@ export type MessageFilter = {
   groups: FilterGroup[];
 };
 
+// Adresse suggérée pour un filtre sur l'expéditeur ou le destinataire
+export type AddressSuggestion = {
+  address: string;
+  name: string;
+};
+
 export type ExportOptions = {
   folderId: string;
   includeSubfolders: boolean;
@@ -110,6 +116,9 @@ export const logout = () => request<void>("/api/auth/logout", { method: "POST" }
 export const getMe = () => request<User>("/api/auth/me");
 
 export const getFolders = () => request<FolderNode[]>("/api/folders");
+
+export const getAddressSuggestions = (query: string, field: "from" | "to") =>
+  request<AddressSuggestion[]>(`/api/addresses?${new URLSearchParams({ q: query, field })}`);
 
 export const getSummary = (options: ExportOptions) =>
   request<Summary>(`/api/export/summary?${exportQuery(options)}`);

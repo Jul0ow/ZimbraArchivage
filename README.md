@@ -15,6 +15,7 @@ Elle reprend la méthode d'échange avec Zimbra du projet
 | Liste des dossiers | SOAP `GetFolderRequest` (les partages montés `link` et les dossiers de recherche `search` sont ignorés) |
 | Recherche des messages | SOAP `SearchRequest` paginé (`inid:<dossier>` et filtres, lots de 500 par défaut) |
 | Téléchargement d'un message | ReST `GET /service/home/~/?id=<id>` au format `.eml` |
+| Suggestions d'adresses des filtres | SOAP `AutoCompleteRequest` (contacts, liste globale, correspondants habituels) puis `SearchRequest` (`from:<début>*` ou `tocc:<début>*`, adresses des 100 messages les plus récents) |
 
 Comme dans Archivage, les appels sont retentés (jusqu'à 5 fois) si Zimbra répond 502, 503 ou 504.
 L'API SOAP est appelée dans sa variante JSON (même point d'entrée `/service/soap`).
@@ -57,7 +58,8 @@ Options d'export :
   destinataire (champs À et Cc), regroupées en groupes. Les conditions d'un groupe sont reliées
   par ET ou par OU, et les groupes entre eux aussi, par exemple
   `(objet contient « facture » ET expéditeur contient « dupont ») OU objet contient « devis »`.
-  La recherche se fait par mots, comme dans Zimbra (`budg*` pour un début de mot) ;
+  La recherche se fait par mots, comme dans Zimbra (`budg*` pour un début de mot).
+  Pour l'expéditeur et le destinataire, des adresses sont suggérées dès 2 caractères saisis ;
 - **uniquement les messages avec pièces jointes** ;
 - **extraire les pièces jointes** dans des fichiers séparés.
 
@@ -74,6 +76,7 @@ navigateur ──► Next.js (frontend/, port 3000) ──/api/*──► FastAP
 - `backend/` : API FastAPI (Python 3.13).
   - `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
   - `GET /api/folders` : arborescence des dossiers de mails
+  - `GET /api/addresses?q=…&field=from|to` : adresses suggérées (10 au plus) pour les filtres
   - `GET /api/export/summary` : nombre de messages et taille estimée d'un export
   - `GET /api/export?folder_id=…&include_subfolders=…&start=AAAA-MM-JJ&end=AAAA-MM-JJ` : archive ZIP
     (`folder_id=1` pour toute la boîte). Paramètres facultatifs : `only_with_attachments=true`,

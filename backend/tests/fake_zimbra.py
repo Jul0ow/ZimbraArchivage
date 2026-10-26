@@ -21,6 +21,7 @@ class FakeMessage:
     content: bytes
     sender: str = ""
     recipients: str = ""
+    sender_name: str = ""
 
     @property
     def has_attachment(self) -> bool:
@@ -32,6 +33,10 @@ class FakeZimbra:
     username: str = "bernard@test.fr"
     password: str = "secret"
     messages: list[FakeMessage] = field(default_factory=list)
+    # Contacts proposés par AutoCompleteRequest : (nom, adresse)
+    contacts: list[tuple[str, str]] = field(default_factory=list)
+    autocomplete_fault: str | None = None
+    search_fault: str | None = None
     failing_message_ids: set[str] = field(default_factory=set)
     searches: list[dict] = field(default_factory=list)
 
@@ -71,20 +76,43 @@ class FakeZimbra:
             return httpx.Response(200, json={"Body": {"GetInfoResponse": {"name": self.username}}})
         if name == "GetFolderRequest":
             return httpx.Response(200, json={"Body": {"GetFolderResponse": {"folder": [ROOT]}}})
+        if name == "AutoCompleteRequest":
+            if self.autocomplete_fault:
+                return self._fault(self.autocomplete_fault, "autocomplete failed")
+            text = params["name"].lower()
+            return httpx.Response(200, json={"Body": {"AutoCompleteResponse": {"match": [
+                {"email": f'"{full}" <{address}>', "type": "contact", "full": full}
+                for full, address in self.contacts
+                if any(word.startswith(text) for word in [*full.lower().split(), address])
+            ]}}})
         if name == "SearchRequest":
             self.searches.append(params)
+            if self.search_fault:
+                return self._fault(self.search_fault, "search failed")
             query = QueryParser(params["query"])
             matching = [m for m in self.messages if query.matches(m)]
-            page = matching[params["offset"]: params["offset"] + params["limit"]]
-            more = params["offset"] + params["limit"] < len(matching)
+            offset = params.get("offset", 0)
+            page = matching[offset: offset + params["limit"]]
+            more = offset + params["limit"] < len(matching)
             return httpx.Response(200, json={"Body": {"SearchResponse": {
                 "m": [
-                    {"id": m.id, "l": m.folder_id, "d": m.date_ms, "s": len(m.content), "su": m.subject}
+                    {
+                        "id": m.id, "l": m.folder_id, "d": m.date_ms, "s": len(m.content), "su": m.subject,
+                        "e": self._addresses(m, params.get("recip")),
+                    }
                     for m in page
                 ],
                 "more": more,
             }}})
         return self._fault("service.UNKNOWN_DOCUMENT", f"unknown request {name}")
+
+    @staticmethod
+    def _addresses(message: FakeMessage, recip: str | None) -> list[dict]:
+        sender = [{"t": "f", "a": message.sender, "p": message.sender_name}] if message.sender else []
+        if recip != "2":
+            return sender
+        recipients = [r.strip() for r in message.recipients.split(",") if r.strip()]
+        return sender + [{"t": "t", "a": r} for r in recipients]
 
     def _rest(self, request: httpx.Request) -> httpx.Response:
         if not self._authenticated(request):

@@ -23,7 +23,7 @@ def ms(*args: int) -> int:
 def zimbra() -> FakeZimbra:
     return FakeZimbra(messages=[
         FakeMessage("101", "2", ms(2024, 1, 10, 9, 30), "Réunion d'équipe", b"Subject: a\r\n\r\nA",
-                    sender="alice@test.fr", recipients="bernard@test.fr"),
+                    sender="alice@test.fr", recipients="bernard@test.fr", sender_name="Alice Martin"),
         FakeMessage("102", "2", ms(2024, 3, 15, 23, 30), "Budget", b"Subject: b\r\n\r\nB",
                     sender="compta@test.fr", recipients="bernard@test.fr, direction@test.fr"),
         FakeMessage("103", "2", ms(2024, 6, 1, 8, 0), "Été", b"Subject: c\r\n\r\nC",
@@ -122,6 +122,75 @@ def test_folders_colors(logged_client: TestClient):
     assert inbox["color"] == "#F66666"
     assert inbox["children"][0]["color"] == "#12AB9F"
     assert sent["color"] is None
+
+
+def test_address_suggestions_from_contacts_then_messages(
+    logged_client: TestClient, zimbra: FakeZimbra
+):
+    zimbra.contacts = [("Alain Térieur", "alain@test.fr"), ("Alice M.", "ALICE@test.fr")]
+
+    response = logged_client.get("/api/addresses", params={"q": "al", "field": "from"})
+
+    # alice@test.fr, aussi expéditrice de messages, n'apparaît qu'une fois
+    assert response.json() == [
+        {"address": "alain@test.fr", "name": "Alain Térieur"},
+        {"address": "ALICE@test.fr", "name": "Alice M."},
+    ]
+    assert zimbra.searches[0]["query"] == "from:al*"
+    assert zimbra.searches[0]["recip"] == "2"
+
+
+def test_address_suggestions_from_message_senders(logged_client: TestClient):
+    response = logged_client.get("/api/addresses", params={"q": "ali"})
+
+    assert response.json() == [{"address": "alice@test.fr", "name": "Alice Martin"}]
+
+
+def test_address_suggestions_for_recipients(logged_client: TestClient, zimbra: FakeZimbra):
+    response = logged_client.get("/api/addresses", params={"q": "dir", "field": "to"})
+
+    # L'expéditeur (compta@test.fr) du message trouvé n'est pas proposé
+    assert response.json() == [{"address": "direction@test.fr", "name": ""}]
+    assert zimbra.searches[0]["query"] == "tocc:dir*"
+
+
+def test_address_suggestions_are_limited(logged_client: TestClient, zimbra: FakeZimbra):
+    zimbra.contacts = [(f"Alex {i}", f"alex{i}@test.fr") for i in range(12)]
+
+    response = logged_client.get("/api/addresses", params={"q": "alex"})
+
+    assert len(response.json()) == 10
+    assert zimbra.searches == []
+
+
+def test_address_suggestions_without_word_search(logged_client: TestClient, zimbra: FakeZimbra):
+    zimbra.contacts = [("Alice Martin", "alice@test.fr")]
+
+    response = logged_client.get("/api/addresses", params={"q": "alice mar"})
+
+    # Plusieurs mots : seule l'autocomplétion de Zimbra est utilisée
+    assert response.status_code == 200
+    assert zimbra.searches == []
+
+
+def test_address_suggestions_ignore_failing_source(logged_client: TestClient, zimbra: FakeZimbra):
+    zimbra.search_fault = "mail.TOO_MANY_QUERY_TERMS_EXPANDED"
+    zimbra.autocomplete_fault = "service.FAILURE"
+
+    response = logged_client.get("/api/addresses", params={"q": "al"})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_address_suggestions_require_two_characters(logged_client: TestClient):
+    assert logged_client.get("/api/addresses", params={"q": "a"}).status_code == 422
+
+
+def test_address_suggestions_with_expired_session(client: TestClient):
+    client.cookies.set("zimbra_session", "jeton-expire", path="/api")
+
+    assert client.get("/api/addresses", params={"q": "al"}).status_code == 401
 
 
 def test_summary_with_subfolders(logged_client: TestClient):

@@ -2,6 +2,7 @@
 
 Reprend les échanges du projet Archivage (ZimbraService) :
 AuthRequest, GetFolderRequest, SearchRequest et téléchargement des .eml en ReST.
+AutoCompleteRequest sert en plus aux suggestions d'adresses des filtres.
 """
 
 import re
@@ -9,6 +10,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from email.utils import parseaddr
 from typing import Any
 
 import httpx
@@ -109,6 +111,20 @@ class MessageSummary:
     date_ms: int
     size: int
     subject: str
+
+
+@dataclass(frozen=True)
+class EmailAddress:
+    address: str
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class MessageAddress:
+    """Adresse d'un message : type "f" (expéditeur), "t" (À) ou "c" (Cc)."""
+
+    type: str
+    address: EmailAddress
 
 
 def _content(value: Any) -> str:
@@ -266,6 +282,37 @@ class ZimbraClient:
             for m in response.get("m", [])
         ]
         return messages, bool(response.get("more", False))
+
+    def search_addresses(self, token: str, query: str, limit: int) -> list[MessageAddress]:
+        """Expéditeurs et destinataires des messages les plus récents trouvés par la recherche."""
+        body = {
+            "types": "message",
+            "limit": limit,
+            "query": query,
+            # 2 : adresses de l'expéditeur et des destinataires dans chaque résultat
+            "recip": "2",
+            "locale": {"_content": "fr_FR"},
+        }
+        response = self._soap("SearchRequest", "urn:zimbraMail", body, token)
+        return [
+            MessageAddress(e.get("t", ""), EmailAddress(e["a"], e.get("p", "")))
+            for m in response.get("m", [])
+            for e in m.get("e", [])
+            if e.get("a")
+        ]
+
+    def autocomplete(self, token: str, text: str) -> list[EmailAddress]:
+        """Adresses des contacts, de la liste globale (GAL) et des correspondants habituels."""
+        response = self._soap(
+            "AutoCompleteRequest", "urn:zimbraMail", {"name": text, "includeGal": 1}, token
+        )
+        addresses = []
+        for match in response.get("match", []):
+            name, address = parseaddr(match.get("email", ""))
+            # Les groupes de contacts n'ont pas d'adresse propre
+            if "@" in address:
+                addresses.append(EmailAddress(address, name or match.get("full", "")))
+        return addresses
 
     def iter_messages(self, token: str, query: str) -> Iterator[MessageSummary]:
         """Parcourt tous les résultats d'une recherche, page par page."""

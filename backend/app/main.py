@@ -1,4 +1,4 @@
-"""API web : connexion Zimbra, liste des dossiers et export ZIP d'un dossier."""
+"""API web : connexion Zimbra, liste des dossiers, suggestions d'adresses et export ZIP d'un dossier."""
 
 import re
 import unicodedata
@@ -14,12 +14,16 @@ from pydantic import BaseModel, Field, ValidationError
 from app.archive import DateRange, ExportRequest, stream_zip, summarize
 from app.config import Settings, get_settings
 from app.filters import MessageFilter
+from app.suggestions import AddressField, suggest_addresses
 from app.zimbra import AuthenticationFailed, Folder, SessionExpired, ZimbraClient, ZimbraError
 
 app = FastAPI(title="Archivage Zimbra", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 # Cookie de session contenant le jeton d'authentification Zimbra
 COOKIE_NAME = "zimbra_session"
+
+# Nombre maximal d'adresses suggérées dans les filtres
+MAX_ADDRESS_SUGGESTIONS = 10
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -71,6 +75,11 @@ class FolderResponse(BaseModel):
     message_count: int
     color: str | None
     children: list["FolderResponse"]
+
+
+class AddressResponse(BaseModel):
+    address: str
+    name: str
 
 
 class SummaryResponse(BaseModel):
@@ -137,6 +146,21 @@ def folders(token: TokenDep, client_factory: ClientFactoryDep) -> list[FolderRes
     with client_factory() as client:
         root = client.get_root_folder(token)
     return to_folder_response(root).children
+
+
+@app.get("/api/addresses")
+def addresses(
+    token: TokenDep,
+    client_factory: ClientFactoryDep,
+    q: Annotated[
+        str, Query(min_length=2, max_length=100, description="Début du nom ou de l'adresse")
+    ],
+    field: AddressField = "from",
+) -> list[AddressResponse]:
+    """Adresses suggérées pour un filtre sur l'expéditeur ou le destinataire."""
+    with client_factory() as client:
+        found = suggest_addresses(client, token, q, field, MAX_ADDRESS_SUGGESTIONS)
+    return [AddressResponse(address=a.address, name=a.name) for a in found]
 
 
 @dataclass(frozen=True)
