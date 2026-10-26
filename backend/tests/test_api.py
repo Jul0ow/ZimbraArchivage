@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -21,10 +22,15 @@ def ms(*args: int) -> int:
 @pytest.fixture
 def zimbra() -> FakeZimbra:
     return FakeZimbra(messages=[
-        FakeMessage("101", "2", ms(2024, 1, 10, 9, 30), "Réunion d'équipe", b"Subject: a\r\n\r\nA"),
-        FakeMessage("102", "2", ms(2024, 3, 15, 23, 30), "Budget", b"Subject: b\r\n\r\nB"),
-        FakeMessage("103", "2", ms(2024, 6, 1, 8, 0), "Été", b"Subject: c\r\n\r\nC"),
-        FakeMessage("201", "257", ms(2024, 3, 1, 12, 0), "Projet X", b"Subject: d\r\n\r\nD"),
+        FakeMessage("101", "2", ms(2024, 1, 10, 9, 30), "Réunion d'équipe", b"Subject: a\r\n\r\nA",
+                    sender="alice@test.fr", recipients="bernard@test.fr"),
+        FakeMessage("102", "2", ms(2024, 3, 15, 23, 30), "Budget", b"Subject: b\r\n\r\nB",
+                    sender="compta@test.fr", recipients="bernard@test.fr, direction@test.fr"),
+        FakeMessage("103", "2", ms(2024, 6, 1, 8, 0), "Été", b"Subject: c\r\n\r\nC",
+                    sender="alice@test.fr", recipients="tous@test.fr"),
+        FakeMessage("201", "257", ms(2024, 3, 1, 12, 0), "Projet X", b"Subject: d\r\n\r\nD",
+                    sender="chef@test.fr", recipients="bernard@test.fr"),
+        FakeMessage("301", "3", ms(2024, 2, 1, 12, 0), "Spam supprimé", b"Subject: e\r\n\r\nE"),
     ])
 
 
@@ -101,7 +107,9 @@ def test_logout_clears_cookie(logged_client: TestClient):
 def test_folders_only_lists_mail_folders(logged_client: TestClient):
     folders = logged_client.get("/api/folders").json()
 
-    assert [(f["id"], f["name"]) for f in folders] == [("2", "Réception"), ("5", "Envoyé")]
+    assert [(f["id"], f["name"]) for f in folders] == [
+        ("2", "Réception"), ("5", "Envoyé"), ("3", "Corbeille"),
+    ]
     assert folders[0]["children"][0]["name"] == "Projets: 2024"
     assert folders[0]["message_count"] == 3
 
@@ -109,7 +117,7 @@ def test_folders_only_lists_mail_folders(logged_client: TestClient):
 def test_folders_colors(logged_client: TestClient):
     folders = logged_client.get("/api/folders").json()
 
-    inbox, sent = folders
+    inbox, sent, _ = folders
     # Couleur prédéfinie 5 (rouge), couleur personnalisée prioritaire, pas de couleur
     assert inbox["color"] == "#F66666"
     assert inbox["children"][0]["color"] == "#12AB9F"
@@ -183,3 +191,152 @@ def test_export_lists_failed_downloads(logged_client: TestClient, zimbra: FakeZi
     errors = archive.read("erreurs.txt").decode()
     assert "Inbox/20240315_Budget_102.eml" in errors
     assert "code HTTP retourné = 500" in errors
+
+
+ATTACHMENT_EML = (
+    b"From: alice@test.fr\r\n"
+    b"Subject: Devis\r\n"
+    b"MIME-Version: 1.0\r\n"
+    b'Content-Type: multipart/mixed; boundary="sep"\r\n'
+    b"\r\n"
+    b"--sep\r\n"
+    b"Content-Type: text/plain; charset=utf-8\r\n"
+    b"\r\n"
+    b"Voir le devis.\r\n"
+    b"--sep\r\n"
+    b'Content-Type: application/pdf; name="devis.pdf"\r\n'
+    b'Content-Disposition: attachment; filename="../devis.pdf"\r\n'
+    b"Content-Transfer-Encoding: base64\r\n"
+    b"\r\n"
+    b"JVBERi0xLjQ=\r\n"
+    b"--sep\r\n"
+    b"Content-Type: application/pdf\r\n"
+    b"Content-Disposition: attachment; filename*=UTF-8''devis.pdf\r\n"
+    b"\r\n"
+    b"deux\r\n"
+    b"--sep\r\n"
+    b"Content-Type: image/png\r\n"
+    b"Content-Disposition: attachment\r\n"
+    b"Content-Transfer-Encoding: base64\r\n"
+    b"\r\n"
+    b"iVBORw==\r\n"
+    b"--sep\r\n"
+    b"Content-Type: message/rfc822\r\n"
+    b"Content-Disposition: attachment\r\n"
+    b"\r\n"
+    b"Subject: Courriel joint\r\n"
+    b"\r\n"
+    b"Bonjour\r\n"
+    b"--sep--\r\n"
+)
+
+
+def filter_param(*groups: list[dict], operator: str = "or", group_operator: str = "and") -> str:
+    return json.dumps({
+        "operator": operator,
+        "groups": [{"operator": group_operator, "conditions": g} for g in groups],
+    })
+
+
+def exported_names(response) -> list[str]:
+    assert response.status_code == 200
+    return sorted(zipfile.ZipFile(io.BytesIO(response.content)).namelist())
+
+
+def test_export_with_or_filter(logged_client: TestClient, zimbra: FakeZimbra):
+    response = logged_client.get("/api/export", params={"folder_id": "2", "filter": filter_param(
+        [{"field": "subject", "value": "budget"}],
+        [{"field": "from", "value": "chef@test.fr"}],
+    )})
+
+    assert exported_names(response) == [
+        "Inbox/20240315_Budget_102.eml",
+        "Inbox/Projets_ 2024/20240301_Projet X_201.eml",
+    ]
+    assert zimbra.searches[0]["query"] == "inid:2 and ((subject:budget) or (from:chef@test.fr))"
+
+
+def test_summary_with_and_filter(logged_client: TestClient):
+    response = logged_client.get("/api/export/summary", params={"folder_id": "2", "filter": filter_param(
+        [
+            {"field": "from", "value": "alice"},
+            {"field": "to", "operator": "not_contains", "value": "tous@test.fr"},
+        ],
+    )})
+
+    assert response.json()["message_count"] == 1
+
+
+def test_filter_combined_with_and_between_groups(logged_client: TestClient):
+    response = logged_client.get("/api/export/summary", params={"folder_id": "2", "filter": filter_param(
+        [{"field": "to", "value": "bernard"}],
+        [{"field": "subject", "value": "budget"}, {"field": "subject", "value": "projet"}],
+        operator="and",
+        group_operator="or",
+    )})
+
+    # (À bernard) ET (objet budget OU objet projet) : 102 et 201
+    assert response.json()["message_count"] == 2
+
+
+def test_invalid_filter(logged_client: TestClient):
+    for value in ["pas du json", json.dumps({"groups": []})]:
+        response = logged_client.get("/api/export/summary", params={"folder_id": "2", "filter": value})
+        assert response.status_code == 422
+        assert response.json()["detail"] == "Filtre invalide"
+
+
+def test_whole_mailbox_excludes_trash(logged_client: TestClient):
+    response = logged_client.get("/api/export", params={"folder_id": "1"})
+
+    assert response.headers["content-disposition"].startswith('attachment; filename="Boite_aux_lettres_')
+    names = exported_names(response)
+    assert len(names) == 4
+    assert not any(name.startswith("Trash/") for name in names)
+
+
+def test_trash_can_be_exported_on_its_own(logged_client: TestClient):
+    response = logged_client.get("/api/export", params={"folder_id": "3"})
+
+    assert exported_names(response) == ["Trash/20240201_Spam supprim__301.eml"]
+
+
+def test_export_only_messages_with_attachments(logged_client: TestClient, zimbra: FakeZimbra):
+    zimbra.messages.append(FakeMessage("104", "2", ms(2024, 7, 1, 10, 0), "Devis", ATTACHMENT_EML))
+
+    response = logged_client.get("/api/export", params={
+        "folder_id": "2", "include_subfolders": "false", "only_with_attachments": "true",
+    })
+
+    assert exported_names(response) == ["Inbox/20240701_Devis_104.eml"]
+    assert zimbra.searches[0]["query"] == "inid:2 and has:attachment"
+
+
+def test_export_extracts_attachments(logged_client: TestClient, zimbra: FakeZimbra):
+    zimbra.messages.append(FakeMessage("104", "2", ms(2024, 7, 1, 10, 0), "Devis", ATTACHMENT_EML))
+
+    response = logged_client.get("/api/export", params={
+        "folder_id": "2", "include_subfolders": "false", "extract_attachments": "true",
+        "filter": filter_param([{"field": "subject", "value": "devis"}]),
+    })
+
+    archive = zipfile.ZipFile(io.BytesIO(response.content))
+    assert sorted(archive.namelist()) == [
+        "Inbox/20240701_Devis_104.eml",
+        "Inbox/20240701_Devis_104/devis (2).pdf",
+        "Inbox/20240701_Devis_104/devis.pdf",
+        "Inbox/20240701_Devis_104/piece_jointe_3.png",
+        "Inbox/20240701_Devis_104/piece_jointe_4.eml",
+    ]
+    assert archive.read("Inbox/20240701_Devis_104.eml") == ATTACHMENT_EML
+    assert archive.read("Inbox/20240701_Devis_104/devis.pdf") == b"%PDF-1.4"
+    assert archive.read("Inbox/20240701_Devis_104/devis (2).pdf") == b"deux"
+    assert b"Subject: Courriel joint" in archive.read("Inbox/20240701_Devis_104/piece_jointe_4.eml")
+
+
+def test_extract_attachments_of_simple_message(logged_client: TestClient):
+    response = logged_client.get("/api/export", params={
+        "folder_id": "257", "extract_attachments": "true",
+    })
+
+    assert exported_names(response) == ["Inbox/Projets_ 2024/20240301_Projet X_201.eml"]

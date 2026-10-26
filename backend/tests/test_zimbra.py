@@ -39,7 +39,7 @@ def test_root_folder_ignores_links_and_searches():
 
     root = client.get_root_folder(VALID_TOKEN)
 
-    assert {f.id for f in root.walk()} == {"1", "2", "257", "5", "7"}
+    assert {f.id for f in root.walk()} == {"1", "2", "257", "5", "3", "7"}
 
 
 def test_iterates_over_all_search_pages():

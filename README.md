@@ -1,7 +1,9 @@
 # Archivage Zimbra (web)
 
 Application web simple qui permet à un utilisateur de se connecter avec son compte
-Zimbra puis de télécharger, sous forme d'archive ZIP, le dossier de mails de son choix.
+Zimbra puis de télécharger, sous forme d'archive ZIP, le dossier de mails de son choix
+(ou toute sa boîte), éventuellement restreint par des filtres sur l'objet, l'expéditeur et
+les destinataires.
 
 Elle reprend la méthode d'échange avec Zimbra du projet
 [ZimbraArchivage](https://gitlab.mim-libre.fr/dgddi/archivage-mails/ZImbraArchivage)
@@ -11,7 +13,7 @@ Elle reprend la méthode d'échange avec Zimbra du projet
 | --- | --- |
 | Connexion | SOAP `AuthRequest` (`urn:zimbraAccount`), le jeton obtenu est passé dans le cookie `ZM_AUTH_TOKEN` |
 | Liste des dossiers | SOAP `GetFolderRequest` (les partages montés `link` et les dossiers de recherche `search` sont ignorés) |
-| Recherche des messages | SOAP `SearchRequest` paginé (`inid:<dossier>`, lots de 500 par défaut) |
+| Recherche des messages | SOAP `SearchRequest` paginé (`inid:<dossier>` et filtres, lots de 500 par défaut) |
 | Téléchargement d'un message | ReST `GET /service/home/~/?id=<id>` au format `.eml` |
 
 Comme dans Archivage, les appels sont retentés (jusqu'à 5 fois) si Zimbra répond 502, 503 ou 504.
@@ -33,10 +35,31 @@ Reception_20261022.zip
         └── 20240301_Projet X_201.eml
 ```
 
+Avec l'option d'extraction des pièces jointes, chaque pièce jointe est aussi enregistrée
+dans un dossier portant le nom du `.eml` (les noms identiques sont numérotés, un courriel joint
+devient un `.eml`). Le `.eml` reste toujours complet, pièces jointes comprises.
+
+```
+Inbox/
+├── 20240701_Devis_104.eml
+└── 20240701_Devis_104/
+    ├── devis.pdf
+    └── devis (2).pdf
+```
+
 Options d'export :
 
+- **dossier** : un dossier de la boîte, ou **toute la boîte aux lettres** (hors Corbeille et
+  Spam, comme la recherche Zimbra) ;
 - **inclure les sous-dossiers** (activé par défaut) ;
-- **période** : date de début et/ou de fin, bornes incluses, dans le fuseau `ZONE_ID`.
+- **période** : date de début et/ou de fin, bornes incluses, dans le fuseau `ZONE_ID` ;
+- **filtres** : conditions « contient / ne contient pas » sur l'objet, l'expéditeur ou le
+  destinataire (champs À et Cc), regroupées en groupes. Les conditions d'un groupe sont reliées
+  par ET ou par OU, et les groupes entre eux aussi, par exemple
+  `(objet contient « facture » ET expéditeur contient « dupont ») OU objet contient « devis »`.
+  La recherche se fait par mots, comme dans Zimbra (`budg*` pour un début de mot) ;
+- **uniquement les messages avec pièces jointes** ;
+- **extraire les pièces jointes** dans des fichiers séparés.
 
 L'archive est construite et envoyée au fil de l'eau : rien n'est stocké côté serveur.
 Si certains messages n'ont pas pu être téléchargés, ils sont listés dans un fichier
@@ -53,6 +76,11 @@ navigateur ──► Next.js (frontend/, port 3000) ──/api/*──► FastAP
   - `GET /api/folders` : arborescence des dossiers de mails
   - `GET /api/export/summary` : nombre de messages et taille estimée d'un export
   - `GET /api/export?folder_id=…&include_subfolders=…&start=AAAA-MM-JJ&end=AAAA-MM-JJ` : archive ZIP
+    (`folder_id=1` pour toute la boîte). Paramètres facultatifs : `only_with_attachments=true`,
+    `extract_attachments=true` et `filter`, un filtre JSON (voir `backend/app/filters.py`) :
+    `{"operator": "or", "groups": [{"operator": "and", "conditions": [{"field": "subject",
+    "operator": "contains", "value": "facture"}]}]}` (champs `subject`, `from`, `to` ;
+    opérateurs `contains`, `not_contains`)
   - Documentation OpenAPI : `/api/docs`
 - `frontend/` : interface Next.js (App Router). Les appels `/api/*` sont relayés vers le
   backend (`BACKEND_URL`, lu à l'exécution). En Kubernetes, l'ingress envoie directement

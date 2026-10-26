@@ -12,12 +12,37 @@ export type FolderNode = {
   children: FolderNode[];
 };
 
+// Dossier racine Zimbra : le choisir revient à exporter toute la boîte aux lettres
+export const ROOT_FOLDER_ID = "1";
+
+export type LogicalOperator = "and" | "or";
+
+export type FilterCondition = {
+  field: "subject" | "from" | "to";
+  operator: "contains" | "not_contains";
+  value: string;
+};
+
+export type FilterGroup = {
+  operator: LogicalOperator;
+  conditions: FilterCondition[];
+};
+
+// Groupes de conditions : même format que MessageFilter côté backend
+export type MessageFilter = {
+  operator: LogicalOperator;
+  groups: FilterGroup[];
+};
+
 export type ExportOptions = {
   folderId: string;
   includeSubfolders: boolean;
   // Dates au format AAAA-MM-JJ, vides si pas de borne
   start: string;
   end: string;
+  filter: MessageFilter | null;
+  onlyWithAttachments: boolean;
+  extractAttachments: boolean;
 };
 
 export type Summary = {
@@ -68,6 +93,9 @@ function exportQuery(options: ExportOptions): string {
   });
   if (options.start) params.set("start", options.start);
   if (options.end) params.set("end", options.end);
+  if (options.filter) params.set("filter", JSON.stringify(options.filter));
+  if (options.onlyWithAttachments) params.set("only_with_attachments", "true");
+  if (options.extractAttachments) params.set("extract_attachments", "true");
   return params.toString();
 }
 

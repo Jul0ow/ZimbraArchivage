@@ -3,15 +3,17 @@
 import re
 import unicodedata
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.archive import DateRange, ExportRequest, stream_zip, summarize
 from app.config import Settings, get_settings
+from app.filters import MessageFilter
 from app.zimbra import AuthenticationFailed, Folder, SessionExpired, ZimbraClient, ZimbraError
 
 app = FastAPI(title="Archivage Zimbra", docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -137,26 +139,69 @@ def folders(token: TokenDep, client_factory: ClientFactoryDep) -> list[FolderRes
     return to_folder_response(root).children
 
 
-def build_export_request(
-    root: Folder,
-    folder_id: str,
-    include_subfolders: bool,
-    start: date | None,
-    end: date | None,
-    settings: Settings,
-) -> ExportRequest:
+@dataclass(frozen=True)
+class ExportParams:
+    """Paramètres communs à l'estimation et à l'export."""
+
+    folder_id: str
+    include_subfolders: bool
+    start: date | None
+    end: date | None
+    message_filter: MessageFilter | None
+    only_with_attachments: bool
+
+
+def export_params(
+    folder_id: Annotated[str, Query(min_length=1, description="Dossier, 1 pour toute la boîte")],
+    include_subfolders: bool = True,
+    start: date | None = None,
+    end: date | None = None,
+    filter_json: Annotated[
+        str | None,
+        Query(
+            alias="filter",
+            max_length=20000,
+            description="Filtre au format JSON (voir MessageFilter dans app/filters.py)",
+        ),
+    ] = None,
+    only_with_attachments: bool = False,
+) -> ExportParams:
     if start and end and start > end:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "La date de début doit précéder la date de fin",
         )
-    folder = root.find(folder_id)
+    message_filter = None
+    if filter_json:
+        try:
+            message_filter = MessageFilter.model_validate_json(filter_json)
+        except ValidationError:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Filtre invalide")
+    return ExportParams(
+        folder_id, include_subfolders, start, end, message_filter, only_with_attachments
+    )
+
+
+ExportParamsDep = Annotated[ExportParams, Depends(export_params)]
+
+
+def build_export_request(
+    root: Folder,
+    params: ExportParams,
+    settings: Settings,
+    extract_attachments: bool = False,
+) -> ExportRequest:
+    folder = root.find(params.folder_id)
     if folder is None or not folder.is_mail_folder:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Dossier introuvable")
-    return ExportRequest(folder, include_subfolders, DateRange(start, end, settings.zone))
-
-
-FolderIdParam = Annotated[str, Query(min_length=1)]
+    return ExportRequest(
+        folder,
+        params.include_subfolders,
+        DateRange(params.start, params.end, settings.zone),
+        message_filter=params.message_filter,
+        only_with_attachments=params.only_with_attachments,
+        extract_attachments=extract_attachments,
+    )
 
 
 @app.get("/api/export/summary")
@@ -164,14 +209,11 @@ def export_summary(
     token: TokenDep,
     settings: SettingsDep,
     client_factory: ClientFactoryDep,
-    folder_id: FolderIdParam,
-    include_subfolders: bool = True,
-    start: date | None = None,
-    end: date | None = None,
+    params: ExportParamsDep,
 ) -> SummaryResponse:
     with client_factory() as client:
         root = client.get_root_folder(token)
-        export = build_export_request(root, folder_id, include_subfolders, start, end, settings)
+        export = build_export_request(root, params, settings)
         summary = summarize(client, token, export)
     return SummaryResponse(
         folder_count=summary.folder_count,
@@ -193,19 +235,15 @@ def export(
     token: TokenDep,
     settings: SettingsDep,
     client_factory: ClientFactoryDep,
-    folder_id: FolderIdParam,
-    include_subfolders: bool = True,
-    start: date | None = None,
-    end: date | None = None,
+    params: ExportParamsDep,
+    extract_attachments: bool = False,
 ) -> StreamingResponse:
     client = client_factory()
     try:
         # Vérifications faites avant de commencer à envoyer l'archive, pour pouvoir
         # encore répondre avec un code d'erreur HTTP
         root = client.get_root_folder(token)
-        export_request = build_export_request(
-            root, folder_id, include_subfolders, start, end, settings
-        )
+        export_request = build_export_request(root, params, settings, extract_attachments)
     except BaseException:
         client.close()
         raise

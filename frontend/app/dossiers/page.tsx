@@ -1,14 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import FilterEditor, { EMPTY_FILTER, type FilterDraft, toMessageFilter } from "@/components/FilterEditor";
 import FolderTree from "@/components/FolderTree";
 import SiteHeader from "@/components/SiteHeader";
 import {
   ApiError,
   type ExportOptions,
   type FolderNode,
+  ROOT_FOLDER_ID,
   type Summary,
   exportUrl,
   formatSize,
@@ -18,6 +20,26 @@ import {
   logout,
 } from "@/lib/api";
 
+// Corbeille et Spam, exclues de l'export de toute la boîte (comme côté backend)
+const EXCLUDED_FROM_MAILBOX = new Set(["3", "4"]);
+
+function countMessages(folder: FolderNode): number {
+  return folder.message_count + folder.children.reduce((sum, c) => sum + countMessages(c), 0);
+}
+
+/** Entrée « Toute la boîte aux lettres », placée avant les dossiers. */
+function mailboxNode(folders: FolderNode[]): FolderNode {
+  const included = folders.filter((f) => !EXCLUDED_FROM_MAILBOX.has(f.id));
+  return {
+    id: ROOT_FOLDER_ID,
+    name: "Toute la boîte aux lettres",
+    path: "/",
+    message_count: included.reduce((sum, f) => sum + countMessages(f), 0),
+    color: null,
+    children: [],
+  };
+}
+
 export default function FoldersPage() {
   const router = useRouter();
   const [username, setUsername] = useState<string | null>(null);
@@ -26,6 +48,9 @@ export default function FoldersPage() {
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [filterDraft, setFilterDraft] = useState<FilterDraft>(EMPTY_FILTER);
+  const [onlyWithAttachments, setOnlyWithAttachments] = useState(false);
+  const [extractAttachments, setExtractAttachments] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [busy, setBusy] = useState<"summary" | "download" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,15 +76,29 @@ export default function FoldersPage() {
       .catch(handleError);
   }, [handleError]);
 
+  const filter = useMemo(() => toMessageFilter(filterDraft), [filterDraft]);
+  const filterKey = JSON.stringify(filter);
+  const treeFolders = useMemo(() => folders && [mailboxNode(folders), ...folders], [folders]);
+  const isMailbox = selected?.id === ROOT_FOLDER_ID;
+
   // Toute modification des options invalide l'estimation précédente
   useEffect(() => {
     setSummary(null);
     setNotice(null);
-  }, [selected, includeSubfolders, start, end]);
+  }, [selected, includeSubfolders, start, end, filterKey, onlyWithAttachments, extractAttachments]);
 
   const datesInvalid = Boolean(start && end && start > end);
   const options: ExportOptions | null = selected
-    ? { folderId: selected.id, includeSubfolders, start, end }
+    ? {
+        folderId: selected.id,
+        // Toute la boîte : les dossiers sont forcément inclus
+        includeSubfolders: isMailbox || includeSubfolders,
+        start,
+        end,
+        filter,
+        onlyWithAttachments,
+        extractAttachments,
+      }
     : null;
 
   async function handleSummary() {
@@ -100,7 +139,7 @@ export default function FoldersPage() {
     router.replace("/");
   }
 
-  if (!folders) {
+  if (!treeFolders) {
     return (
       <>
         <SiteHeader username={username} onLogout={handleLogout} />
@@ -127,7 +166,7 @@ export default function FoldersPage() {
           <section className="card">
             <h2>Dossiers</h2>
             <FolderTree
-              folders={folders}
+              folders={treeFolders}
               selectedId={selected?.id ?? null}
               onSelect={setSelected}
             />
@@ -139,19 +178,27 @@ export default function FoldersPage() {
               <p className="muted">Sélectionnez un dossier à télécharger.</p>
             ) : (
               <div className="form">
-                <p>
-                  Dossier sélectionné : <strong>{selected.name}</strong>{" "}
-                  <span className="muted">({selected.path})</span>
-                </p>
-
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={includeSubfolders}
-                    onChange={(e) => setIncludeSubfolders(e.target.checked)}
-                  />
-                  Inclure les sous-dossiers
-                </label>
+                {isMailbox ? (
+                  <p>
+                    Export de <strong>toute la boîte aux lettres</strong>{" "}
+                    <span className="muted">(hors Corbeille et Spam)</span>
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      Dossier sélectionné : <strong>{selected.name}</strong>{" "}
+                      <span className="muted">({selected.path})</span>
+                    </p>
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={includeSubfolders}
+                        onChange={(e) => setIncludeSubfolders(e.target.checked)}
+                      />
+                      Inclure les sous-dossiers
+                    </label>
+                  </>
+                )}
 
                 <fieldset className="dates">
                   <legend>Période (facultatif)</legend>
@@ -177,6 +224,31 @@ export default function FoldersPage() {
                 {datesInvalid && (
                   <p className="error">La date de début doit précéder la date de fin.</p>
                 )}
+
+                <FilterEditor value={filterDraft} onChange={setFilterDraft} />
+
+                <fieldset className="options">
+                  <legend>Pièces jointes</legend>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={onlyWithAttachments}
+                      onChange={(e) => setOnlyWithAttachments(e.target.checked)}
+                    />
+                    Uniquement les messages avec pièces jointes
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={extractAttachments}
+                      onChange={(e) => setExtractAttachments(e.target.checked)}
+                    />
+                    Extraire aussi les pièces jointes dans des fichiers séparés
+                  </label>
+                  <p className="hint muted">
+                    Le fichier .eml contient toujours le message complet avec ses pièces jointes.
+                  </p>
+                </fieldset>
 
                 {summary && (
                   <p className="info">

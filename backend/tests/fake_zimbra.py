@@ -1,6 +1,7 @@
 """Faux serveur Zimbra (SOAP JSON + ReST) branché sur httpx.MockTransport."""
 
 import json
+import re
 from dataclasses import dataclass, field
 
 import httpx
@@ -18,6 +19,12 @@ class FakeMessage:
     date_ms: int
     subject: str
     content: bytes
+    sender: str = ""
+    recipients: str = ""
+
+    @property
+    def has_attachment(self) -> bool:
+        return b"content-disposition: attachment" in self.content.lower()
 
 
 @dataclass
@@ -66,8 +73,8 @@ class FakeZimbra:
             return httpx.Response(200, json={"Body": {"GetFolderResponse": {"folder": [ROOT]}}})
         if name == "SearchRequest":
             self.searches.append(params)
-            folder_id = params["query"].split()[0].removeprefix("inid:")
-            matching = [m for m in self.messages if m.folder_id == folder_id]
+            query = QueryParser(params["query"])
+            matching = [m for m in self.messages if query.matches(m)]
             page = matching[params["offset"]: params["offset"] + params["limit"]]
             more = params["offset"] + params["limit"] < len(matching)
             return httpx.Response(200, json={"Body": {"SearchResponse": {
@@ -91,6 +98,69 @@ class FakeZimbra:
         return httpx.Response(200, content=message.content)
 
 
+class QueryParser:
+    """Évalue la syntaxe de recherche Zimbra utilisée par l'application (sans les dates)."""
+
+    TOKEN = re.compile(r'\(|\)|[a-z]+:(?:"(?:[^"\\]|\\.)*"|[^\s()]+)|[^\s()]+')
+
+    def __init__(self, query: str):
+        self.tokens = self.TOKEN.findall(query)
+
+    def matches(self, message: FakeMessage) -> bool:
+        self.position = 0
+        result = self._or(message)
+        assert self.position == len(self.tokens), f"requête mal formée : {self.tokens}"
+        return result
+
+    def _next(self, expected: str | None = None) -> str:
+        token = self.tokens[self.position]
+        assert expected is None or token == expected, f"{expected} attendu : {self.tokens}"
+        self.position += 1
+        return token
+
+    def _peek(self) -> str | None:
+        return self.tokens[self.position] if self.position < len(self.tokens) else None
+
+    def _or(self, message: FakeMessage) -> bool:
+        result = self._and(message)
+        while self._peek() == "or":
+            self._next()
+            result = self._and(message) or result
+        return result
+
+    def _and(self, message: FakeMessage) -> bool:
+        result = self._unary(message)
+        while self._peek() == "and":
+            self._next()
+            result = self._unary(message) and result
+        return result
+
+    def _unary(self, message: FakeMessage) -> bool:
+        token = self._next()
+        if token == "not":
+            return not self._unary(message)
+        if token == "(":
+            result = self._or(message)
+            self._next(")")
+            return result
+        return self._term(token, message)
+
+    @staticmethod
+    def _term(token: str, message: FakeMessage) -> bool:
+        name, _, value = token.partition(":")
+        if value.startswith('"'):
+            value = re.sub(r"\\(.)", r"\1", value[1:-1])
+        value = value.removesuffix("*").lower()
+        if name == "inid":
+            return message.folder_id == value
+        if name in ("after", "before"):
+            return True
+        if name == "has" and value == "attachment":
+            return message.has_attachment
+        fields = {"subject": message.subject, "from": message.sender, "tocc": message.recipients}
+        return value in fields[name].lower()
+
+
 ROOT = {
     "id": "1",
     "name": "USER_ROOT",
@@ -108,6 +178,7 @@ ROOT = {
             ],
         },
         {"id": "5", "name": "Sent", "absFolderPath": "/Sent", "view": "message", "n": 0},
+        {"id": "3", "name": "Trash", "absFolderPath": "/Trash", "view": "message", "n": 1},
         {"id": "7", "name": "Contacts", "absFolderPath": "/Contacts", "view": "contact", "n": 0},
     ],
     "link": [{"id": "300", "name": "Partage", "absFolderPath": "/Partage"}],

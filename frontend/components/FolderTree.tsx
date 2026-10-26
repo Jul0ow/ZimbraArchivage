@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { FolderNode } from "@/lib/api";
+import { type FolderNode, ROOT_FOLDER_ID } from "@/lib/api";
 
 type Props = {
   folders: FolderNode[];
@@ -49,7 +49,7 @@ function FolderItem({
           <span className="tree-toggle" />
         )}
         <button type="button" className="tree-label" onClick={() => onSelect(folder)}>
-          <FolderIcon color={folder.color} />
+          {folder.id === ROOT_FOLDER_ID ? <MailboxIcon /> : <FolderIcon color={folder.color} />}
           <span className="tree-name">{folder.name}</span>
           <span className="badge" title="Nombre de messages">
             {folder.message_count}
@@ -83,6 +83,20 @@ function FolderIcon({ color }: { color: string | null }) {
         // Contour discret pour garder lisibles les couleurs claires (jaune, cyan...)
         stroke="rgba(0, 0, 0, 0.25)"
         strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function MailboxIcon() {
+  return (
+    <svg className="tree-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        d="M4 13.5 6.2 5.6A1.5 1.5 0 0 1 7.64 4.5h8.72a1.5 1.5 0 0 1 1.44 1.1L20 13.5v4A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5zM4.5 13.5h4.25l1 2h4.5l1-2h4.25"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
       />
     </svg>
   );

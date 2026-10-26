@@ -40,7 +40,7 @@ ZIMBRA_COLORS = [
 RGB_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 HUMAN_NAMES = {
-    "1": "Racine",
+    "1": "Boîte aux lettres",
     "2": "Réception",
     "3": "Corbeille",
     "4": "Spam",
