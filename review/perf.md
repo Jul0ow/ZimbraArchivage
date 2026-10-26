@@ -38,7 +38,7 @@ Points positifs : le ZIP est bien produit en flux (`_ChunkSink` + `ZipFile` non 
 
 ### [Moyenne] L'extraction des pièces jointes charge tout le message et toutes les pièces décodées en mémoire
 - Emplacement : `backend/app/archive.py:244` (`list(extract_attachment_files(buffer))`), `backend/app/archive.py:253-267`
-- Problème : `BytesParser(policy=policy.default).parse(eml)` construit tout l'arbre MIME en mémoire, `get_payload(decode=True)` décode chaque pièce (base64 → ×0,75 en octets, mais copie complète), et `list(...)` conserve toutes les pièces décodées simultanément avant d'écrire la première. Un mail de 25 à 50 Mo (limite classique) consomme facilement 3 à 5 fois sa taille, soit 150 à 250 Mo, à comparer à la limite du pod de 512 Mi (`charts/.../values.yaml:33`), alors que le reste du chemin est conçu pour borner la mémoire à 10 Mo. Plusieurs exports concurrents multiplient ce risque d'OOM-kill, qui interrompt tous les exports du pod.
+- Problème : `BytesParser(policy=policy.default).parse(eml)` construit tout l'arbre MIME en mémoire, `get_payload(decode=True)` décode chaque pièce (base64 → ×0,75 en octets, mais copie complète), et `list(...)` conserve toutes les pièces décodées simultanément avant d'écrire la première. Un mail de 25 à 50 Mo (limite classique) consomme facilement 3 à 5 fois sa taille, soit 150 à 250 Mo, à comparer à la limite du pod de 512 Mi (`charts/zimbra-archivage/values.yaml:33`), alors que le reste du chemin est conçu pour borner la mémoire à 10 Mo. Plusieurs exports concurrents multiplient ce risque d'OOM-kill, qui interrompt tous les exports du pod.
 - Recommandation : remplacer le `list(...)` par une itération qui écrit chaque pièce dans le ZIP dès qu'elle est décodée (le générateur existe déjà, il suffit de consommer `for name, content in extract_attachment_files(buffer): archive.writestr(...)` dans le même `try`) et libère la pièce ensuite. Pour aller plus loin, utiliser `part.get_content()`/`walk()` avec `del` de chaque contenu, et ignorer les pièces au-delà d'une taille configurable en l'indiquant dans `erreurs.txt`.
 
 ### [Moyenne] Compression Deflate systématique, y compris pour des contenus déjà compressés, et exécutée dans le threadpool avec le GIL
@@ -57,7 +57,7 @@ Points positifs : le ZIP est bien produit en flux (`_ChunkSink` + `ZipFile` non 
 - Recommandation : créer un `httpx.Client` partagé au démarrage (lifespan FastAPI) avec `httpx.Limits(max_connections=…, max_keepalive_connections=…)` et le passer à `ZimbraClient` ; ne plus le fermer dans `__exit__`. Les en-têtes `Cookie` sont déjà fournis requête par requête, donc le partage est sûr tant qu'aucun cookie jar n'est utilisé.
 
 ### [Moyenne] Sondes de santé exécutées dans le threadpool partagé avec les exports : risque de redémarrage du pod en pleine charge
-- Emplacement : `backend/app/main.py:114-116` (`def health`), `charts/zimbra-archivage/templates/backend.yaml:121-128`
+- Emplacement : `backend/app/main.py:114-116` (`def health`), `charts/zimbra-archivage/templates/backend.yaml:38-45`
 - Problème : `health` est une fonction synchrone, donc exécutée via `anyio.to_thread` dans un pool de 40 threads. Ce pool est partagé avec chaque chunk des exports, les retries bloquants (`time.sleep` jusqu'à 363 s dans `zimbra.py:192`) et toutes les autres routes `def`. Sous charge, la sonde peut attendre un thread libre au-delà du `timeoutSeconds` (1 s par défaut), `livenessProbe` échoue (3 fois par défaut, soit 30 s) et le kubelet tue le pod, interrompant tous les exports en cours. Aucun `timeoutSeconds`, `periodSeconds` ni `startupProbe` n'est défini.
 - Recommandation : déclarer `async def health()` (aucun accès bloquant) pour qu'elle soit servie par la boucle d'événements, et ajouter dans le chart `timeoutSeconds: 3`, `failureThreshold: 6` à la liveness, et un `startupProbe`.
 
@@ -95,7 +95,7 @@ Points positifs : le ZIP est bien produit en flux (`_ChunkSink` + `ZipFile` non 
 - Recommandation : intervalle adaptatif (1 s puis 2 à 5 s si `document.hidden`, backoff exponentiel après erreur), n'appeler `setState` que si `done`/`status` changent (`setState(prev => same ? prev : next)`), ou passer en SSE/streaming (`text/event-stream`) pour supprimer le sondage. Passer `export_progress` en `async def` (lecture mémoire, sans I/O).
 
 ### [Faible] Re-rendus React : arbre de dossiers et formulaire non mémoïsés
-- Emplacement : `frontend/components/FolderTree.tsx:19-72` (`FolderItem`), `frontend/app/dossiers/page.tsx:45-93, 193-197`
+- Emplacement : `frontend/components/FolderTree.tsx:13-84` (`FolderItem`, l.23), `frontend/app/dossiers/page.tsx:45-93, 193-197`
 - Problème : tout état de `FoldersPage` (frappe d'une date, d'un filtre, tick de progression) re-rend `FolderTree` et tous ses `FolderItem` (non `memo`). Avec plusieurs milliers de dossiers dépliés, cela devient visible. De plus, l'`useEffect` des lignes 90-93 déclenche un rendu supplémentaire à chaque modification d'option (état dérivé qu'il vaudrait mieux calculer ou réinitialiser dans les gestionnaires). `countMessages` est recalculée récursivement à chaque changement de `folders` (déjà dans `useMemo`, correct).
 - Recommandation : `export default memo(FolderItem)` avec `onSelect` stable (c'est déjà `setSelected`), déplacer `DownloadOverlay`/`useExportProgress` dans un composant enfant isolé afin que ses ticks ne re-rendent pas la page, et regrouper les options dans un seul état `options` pour remplacer l'effet de réinitialisation.
 
@@ -105,12 +105,12 @@ Points positifs : le ZIP est bien produit en flux (`_ChunkSink` + `ZipFile` non 
 - Recommandation : indexer les dossiers dans un dict `{id: Folder}` lors de `_parse_folder`, et éventuellement mettre l'arbre en cache quelques secondes par jeton (TTL court) pour le triplet `folders` → `summary` → `export`. L'appel `getMe()` dans `handleDownload` (`page.tsx:134`) est un aller-retour de plus que l'`/api/export` ferait lui-même en cas de 401.
 
 ### [Faible] Suggestions d'adresses : deux sources interrogées en série, sans annulation côté client
-- Emplacement : `backend/app/suggestions.py:114-128`, `frontend/components/ConditionValueInput.tsx:29-49`
+- Emplacement : `backend/app/suggestions.py:52-66`, `frontend/components/ConditionValueInput.tsx:29-49`
 - Problème : `autocomplete` puis `search_addresses` sont exécutés l'un après l'autre (la seconde ne l'est que si la première ne remplit pas 10 résultats, ce qui est le cas courant). La latence est la somme des deux. Côté front, un `cancelled` ignore le résultat mais ne coupe pas la requête HTTP (pas d'`AbortController`) : une frappe rapide laisse des recherches `SearchRequest` coûteuses se terminer côté Zimbra.
 - Recommandation : lancer les deux sources en parallèle (`ThreadPoolExecutor(2)`), et passer un `signal` d'`AbortController` à `fetch` (via `request`) pour annuler les requêtes obsolètes ; mettre en cache de courte durée (30 à 60 s) les réponses par (jeton, champ, préfixe).
 
 ### [Faible] Ressources Helm : requests basses, pas de `terminationGracePeriodSeconds`, pas d'affinité de session ni de plafond sur `/tmp`
-- Emplacement : `charts/zimbra-archivage/values.yaml:21-37`, `charts/zimbra-archivage/templates/backend.yaml:121-137`, `charts/zimbra-archivage/templates/frontend.yaml:39-48`
+- Emplacement : `charts/zimbra-archivage/values.yaml:21-36`, `charts/zimbra-archivage/templates/backend.yaml:38-54`, `charts/zimbra-archivage/templates/frontend.yaml:39-48`
 - Problème :
   - `requests.cpu: 100m` et `requests.memory: 128Mi` pour un service qui compresse (CPU) et peut avoir un pic de plusieurs centaines de Mo (QoS Burstable avec un rapport request/limit de 1:4) : risque d'éviction sous pression mémoire du nœud et de throttling en cas de nœud chargé (aucune limite CPU, ce qui est bien, mais la request pilote le partage).
   - Pas de `terminationGracePeriodSeconds` ni de `preStop` : à chaque déploiement/rollout, le pod reçoit SIGTERM et est tué après 30 s, ce qui coupe en plein flux tous les exports (qui durent des minutes à des heures). Uvicorn n'a pas de `--timeout-graceful-shutdown`.
@@ -132,13 +132,13 @@ Points positifs : le ZIP est bien produit en flux (`_ChunkSink` + `ZipFile` non 
   Ajouter `sessionAffinity: ClientIP` sur le Service backend (et l'annotation `nginx.ingress.kubernetes.io/affinity: "cookie"` côté ingress) tant que la progression est locale au pod, ou externaliser la progression (Redis) avant d'augmenter les réplicas.
 
 ### [Faible] Serveur applicatif : un seul processus uvicorn, pas de limite de requêtes ni de paramétrage du pool
-- Emplacement : `backend/Dockerfile:15-16` (`CMD ["uvicorn", …]`), `docker-compose.yml:20-37`
+- Emplacement : `backend/Dockerfile:20` (`CMD ["uvicorn", …]`), `docker-compose.yml:8-26`
 - Problème : un seul worker uvicorn (le GIL partage compression, parsing MIME et JSON entre tous les exports) et le pool de threads anyio est laissé à 40. Dans `docker-compose.yml`, aucune limite de ressources (`mem_limit`, `cpus`) n'est posée : un export peut consommer toute la mémoire de l'hôte. Les réponses JSON ne sont pas compressées (`GZipMiddleware` est inutile pour le ZIP, mais utile pour la liste de dossiers volumineuse via `/api/folders`, d'autant que l'ingress route `/api` vers le backend sans passer par la compression de Next).
 - Recommandation : si la concurrence est un objectif, `--workers 2` (en tenant compte du fait que `ProgressRegistry` est en mémoire par processus, donc incompatible tel quel : il faudrait un stockage partagé), ou augmenter le pool via `anyio.to_thread.current_default_thread_limiter().total_tokens` ; ajouter `mem_limit: 768m` au service backend du compose ; ajouter `GZipMiddleware(minimum_size=1024)` limité aux réponses JSON (le ZIP a le type `application/zip`, non concerné si l'on filtre).
 
 ### [Info] Le proxy Next.js ajoute un saut pour le flux ZIP en docker-compose, et la taille du ZIP n'est pas annoncée
-- Emplacement : `frontend/app/api/[...path]/route.ts:313-344`, `docker-compose.yml:38-48`
-- Problème : en déploiement Helm, l'ingress envoie `/api` directement au backend (`charts/.../ingress.yaml:189-196`), donc le proxy n'est pas sur le chemin critique. En revanche, avec docker-compose, tout l'archive transite par Node/undici : correct grâce au streaming (`response.body` relayé), mais ajoute un saut mémoire/CPU et dépend de la contre-pression de `ReadableStream`. L'archive n'ayant pas de `Content-Length`, le navigateur ne peut pas afficher de pourcentage (compensé par l'overlay), et un téléchargement interrompu n'est pas reprenable.
+- Emplacement : `frontend/app/api/[...path]/route.ts:28-59`, `docker-compose.yml:28-40`
+- Problème : en déploiement Helm, l'ingress envoie `/api` directement au backend (`charts/zimbra-archivage/templates/ingress.yaml:25-31`), donc le proxy n'est pas sur le chemin critique. En revanche, avec docker-compose, tout l'archive transite par Node/undici : correct grâce au streaming (`response.body` relayé), mais ajoute un saut mémoire/CPU et dépend de la contre-pression de `ReadableStream`. L'archive n'ayant pas de `Content-Length`, le navigateur ne peut pas afficher de pourcentage (compensé par l'overlay), et un téléchargement interrompu n'est pas reprenable.
 - Recommandation : documenter que le déploiement recommandé route `/api` directement vers le backend (comme l'ingress Helm) ; si le proxy Next doit rester, vérifier avec un export de plusieurs Go qu'aucun tampon ne gonfle dans `route.ts`, et poser `compress: false` dans `next.config.ts` pour éviter toute tentative de compression du flux.
 
 ---
