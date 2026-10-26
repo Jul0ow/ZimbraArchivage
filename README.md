@@ -64,6 +64,10 @@ Options d'export :
 - **extraire les pièces jointes** dans des fichiers séparés.
 
 L'archive est construite et envoyée au fil de l'eau : rien n'est stocké côté serveur.
+Pendant le téléchargement, un écran d'attente affiche le nombre de messages déjà ajoutés à
+l'archive et se ferme une fois l'archive terminée. Cet avancement est gardé en mémoire par le
+backend : avec plusieurs réplicas, l'écran se contente d'une attente simple si l'avancement est
+suivi par un autre réplica.
 Si certains messages n'ont pas pu être téléchargés, ils sont listés dans un fichier
 `erreurs.txt` à la racine de l'archive.
 
@@ -84,6 +88,8 @@ navigateur ──► Next.js (frontend/, port 3000) ──/api/*──► FastAP
     `{"operator": "or", "groups": [{"operator": "and", "conditions": [{"field": "subject",
     "operator": "contains", "value": "facture"}]}]}` (champs `subject`, `from`, `to` ;
     opérateurs `contains`, `not_contains`)
+  - `GET /api/export/progress?export_id=…` : avancement d'un export lancé avec le paramètre
+    `export_id` (identifiant choisi par l'interface), visible de la seule session qui l'a lancé
   - Documentation OpenAPI : `/api/docs`
 - `frontend/` : interface Next.js (App Router). Les appels `/api/*` sont relayés vers le
   backend (`BACKEND_URL`, lu à l'exécution). En Kubernetes, l'ingress envoie directement

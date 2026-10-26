@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
 from app.main import app, get_client_factory
+from app.progress import ProgressRegistry, get_progress_registry
 from app.zimbra import ZimbraClient
 from tests.fake_zimbra import REST_URL, SOAP_URL, VALID_TOKEN, FakeMessage, FakeZimbra
 
@@ -50,6 +51,8 @@ def client(zimbra: FakeZimbra, settings: Settings):
     app.dependency_overrides[get_client_factory] = lambda: (
         lambda: ZimbraClient(settings, transport=zimbra.transport(), sleep=lambda _: None)
     )
+    registry = ProgressRegistry()
+    app.dependency_overrides[get_progress_registry] = lambda: registry
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -248,6 +251,38 @@ def test_export_zip_without_subfolders_and_date_range(logged_client: TestClient)
         "Inbox/20240110_R_union d__quipe_101.eml",
         "Inbox/20240315_Budget_102.eml",
     ]
+
+
+def test_export_progress(logged_client: TestClient, zimbra: FakeZimbra):
+    zimbra.failing_message_ids = {"102"}
+
+    response = logged_client.get("/api/export", params={"folder_id": "2", "export_id": "export-1234"})
+    assert response.status_code == 200
+
+    progress = logged_client.get("/api/export/progress", params={"export_id": "export-1234"})
+    # Les messages en erreur comptent aussi comme traités
+    assert progress.json() == {"done": 4, "finished": True}
+
+
+def test_export_progress_unknown(logged_client: TestClient):
+    response = logged_client.get("/api/export/progress", params={"export_id": "inconnu-1234"})
+
+    assert response.status_code == 404
+
+
+def test_export_progress_of_another_session(logged_client: TestClient):
+    logged_client.get("/api/export", params={"folder_id": "2", "export_id": "export-1234"})
+    logged_client.cookies.set("zimbra_session", "autre-jeton", path="/api")
+
+    response = logged_client.get("/api/export/progress", params={"export_id": "export-1234"})
+
+    assert response.status_code == 404
+
+
+def test_export_rejects_invalid_export_id(logged_client: TestClient):
+    response = logged_client.get("/api/export", params={"folder_id": "2", "export_id": "a/b"})
+
+    assert response.status_code == 422
 
 
 def test_export_lists_failed_downloads(logged_client: TestClient, zimbra: FakeZimbra):

@@ -485,3 +485,86 @@ select {
   font-size: 0.9rem;
   overflow-wrap: anywhere;
 }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(22, 22, 22, 0.55);
+}
+
+.overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 28rem;
+  padding: 2rem 1.5rem 1.5rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  text-align: center;
+}
+
+.overlay-card h2,
+.overlay-card p {
+  margin: 0;
+}
+
+.spinner {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 4px solid var(--selected);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.progress-bar {
+  position: relative;
+  width: 100%;
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--selected);
+}
+
+.progress-value {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.4s ease;
+}
+
+/* Nombre total de messages inconnu : barre animée en continu */
+.progress-value.indeterminate {
+  position: absolute;
+  width: 35%;
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes slide {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .progress-value.indeterminate {
+    animation-duration: 3s;
+  }
+}

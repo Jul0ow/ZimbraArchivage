@@ -57,6 +57,12 @@ export type Summary = {
   total_size: number;
 };
 
+export type ExportProgress = {
+  // Nombre de courriels traités (ajoutés à l'archive ou en erreur)
+  done: number;
+  finished: boolean;
+};
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -123,7 +129,18 @@ export const getAddressSuggestions = (query: string, field: "from" | "to") =>
 export const getSummary = (options: ExportOptions) =>
   request<Summary>(`/api/export/summary?${exportQuery(options)}`);
 
-export const exportUrl = (options: ExportOptions) => `/api/export?${exportQuery(options)}`;
+// exportId permet de suivre l'avancement de l'export avec getExportProgress
+export const exportUrl = (options: ExportOptions, exportId: string) =>
+  `/api/export?${exportQuery(options)}&${new URLSearchParams({ export_id: exportId })}`;
+
+export const getExportProgress = (exportId: string) =>
+  request<ExportProgress>(`/api/export/progress?${new URLSearchParams({ export_id: exportId })}`);
+
+/** Identifiant aléatoire d'un export (crypto.randomUUID n'existe qu'en HTTPS). */
+export function newExportId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export function formatSize(bytes: number): string {
   const units = ["o", "Ko", "Mo", "Go", "To"];

@@ -9,7 +9,7 @@ import mimetypes
 import re
 import tempfile
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from email import policy
 from email.message import EmailMessage
@@ -182,8 +182,12 @@ def stream_zip(
     export: ExportRequest,
     zone: ZoneInfo,
     max_file_name_length: int,
+    on_message: Callable[[], None] = lambda: None,
 ) -> Iterator[bytes]:
-    """Génère l'archive ZIP au fil de l'eau, sans la stocker entièrement."""
+    """Génère l'archive ZIP au fil de l'eau, sans la stocker entièrement.
+
+    on_message est appelé après chaque courriel traité, ajouté ou en erreur.
+    """
     sink = _ChunkSink()
     errors: list[str] = []
     with zipfile.ZipFile(sink, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -198,6 +202,7 @@ def stream_zip(
                     )
                     if error:
                         errors.append(f"{arcname} : {error}")
+                    on_message()
                     yield sink.drain()
             except ZimbraError as e:
                 errors.append(f"Dossier {folder.abs_folder_path} : {e.message}")

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.archive import DateRange, ExportRequest, stream_zip, summarize
 from app.config import Settings, get_settings
 from app.filters import MessageFilter
+from app.progress import ProgressRegistry, get_progress_registry
 from app.suggestions import AddressField, suggest_addresses
 from app.zimbra import AuthenticationFailed, Folder, SessionExpired, ZimbraClient, ZimbraError
 
@@ -43,6 +44,11 @@ def get_token(request: Request) -> str:
 
 
 TokenDep = Annotated[str, Depends(get_token)]
+
+ProgressRegistryDep = Annotated[ProgressRegistry, Depends(get_progress_registry)]
+
+# Identifiant d'un export choisi par l'interface pour en suivre l'avancement
+ExportId = Annotated[str, Query(pattern=r"^[A-Za-z0-9-]{8,64}$")]
 
 
 @app.exception_handler(SessionExpired)
@@ -80,6 +86,12 @@ class FolderResponse(BaseModel):
 class AddressResponse(BaseModel):
     address: str
     name: str
+
+
+class ProgressResponse(BaseModel):
+    # Nombre de courriels traités (ajoutés à l'archive ou en erreur)
+    done: int
+    finished: bool
 
 
 class SummaryResponse(BaseModel):
@@ -246,6 +258,16 @@ def export_summary(
     )
 
 
+@app.get("/api/export/progress")
+def export_progress(
+    token: TokenDep, progress_registry: ProgressRegistryDep, export_id: ExportId
+) -> ProgressResponse:
+    progress = progress_registry.get(token, export_id)
+    if progress is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Export introuvable")
+    return ProgressResponse(done=progress.done, finished=progress.finished)
+
+
 def archive_file_name(folder: Folder, settings: Settings) -> str:
     """Nom du fichier ZIP, en ASCII pour être interprété de la même façon par tous les navigateurs."""
     today = datetime.now(settings.zone)
@@ -260,7 +282,9 @@ def export(
     settings: SettingsDep,
     client_factory: ClientFactoryDep,
     params: ExportParamsDep,
+    progress_registry: ProgressRegistryDep,
     extract_attachments: bool = False,
+    export_id: ExportId | None = None,
 ) -> StreamingResponse:
     client = client_factory()
     try:
@@ -272,11 +296,28 @@ def export(
         client.close()
         raise
 
+    # Enregistré avant l'envoi, pour que l'interface trouve l'export dès son lancement
+    progress = progress_registry.start(token, export_id) if export_id else None
+
+    def on_message() -> None:
+        if progress:
+            progress_registry.advance(progress)
+
     def content() -> Iterator[bytes]:
-        with client:
-            yield from stream_zip(
-                client, token, export_request, settings.zone, settings.max_file_name_length
-            )
+        try:
+            with client:
+                yield from stream_zip(
+                    client,
+                    token,
+                    export_request,
+                    settings.zone,
+                    settings.max_file_name_length,
+                    on_message=on_message,
+                )
+        finally:
+            # Archive complète, ou téléchargement interrompu
+            if progress:
+                progress_registry.finish(progress)
 
     file_name = archive_file_name(export_request.folder, settings)
     return StreamingResponse(

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import DownloadOverlay, { useExportProgress } from "@/components/DownloadOverlay";
 import FilterEditor, { EMPTY_FILTER, type FilterDraft, toMessageFilter } from "@/components/FilterEditor";
 import FolderTree from "@/components/FolderTree";
 import SiteHeader from "@/components/SiteHeader";
@@ -18,6 +19,7 @@ import {
   getMe,
   getSummary,
   logout,
+  newExportId,
 } from "@/lib/api";
 
 // Corbeille et Spam, exclues de l'export de toute la boîte (comme côté backend)
@@ -55,6 +57,9 @@ export default function FoldersPage() {
   const [busy, setBusy] = useState<"summary" | "download" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Export en cours de téléchargement, suivi par l'écran d'attente
+  const [download, setDownload] = useState<{ id: string; total: number | null } | null>(null);
+  const exportProgress = useExportProgress(download?.id ?? null);
 
   const handleError = useCallback(
     (e: unknown) => {
@@ -86,6 +91,12 @@ export default function FoldersPage() {
     setSummary(null);
     setNotice(null);
   }, [selected, includeSubfolders, start, end, filterKey, onlyWithAttachments, extractAttachments]);
+
+  useEffect(() => {
+    if (exportProgress.status !== "finished") return;
+    setDownload(null);
+    setNotice("Archive terminée : le fichier ZIP est dans les téléchargements de votre navigateur.");
+  }, [exportProgress.status]);
 
   const datesInvalid = Boolean(start && end && start > end);
   const options: ExportOptions | null = selected
@@ -121,17 +132,31 @@ export default function FoldersPage() {
     try {
       // Vérifie que la session est toujours valide avant de lancer le téléchargement
       await getMe();
+      const id = newExportId();
       // La réponse étant une pièce jointe, le navigateur la télécharge sans quitter la page
-      window.location.assign(exportUrl(options));
-      setNotice(
-        "Le téléchargement a démarré. L'archive est construite au fil de l'eau : " +
-          "pour un gros dossier, cela peut prendre plusieurs minutes.",
-      );
+      window.location.assign(exportUrl(options, id));
+      setDownload({ id, total: summary?.message_count ?? null });
+      if (!summary) {
+        // Nombre de messages attendus, pour la barre de progression
+        getSummary(options)
+          .then(({ message_count }) =>
+            setDownload((d) => (d?.id === id ? { ...d, total: message_count } : d)),
+          )
+          .catch(() => undefined);
+      }
     } catch (e) {
       handleError(e);
     } finally {
       setBusy(null);
     }
+  }
+
+  function handleHideDownload() {
+    setDownload(null);
+    setNotice(
+      "Le téléchargement continue : suivez son avancement dans la liste des téléchargements " +
+        "de votre navigateur.",
+    );
   }
 
   async function handleLogout() {
@@ -276,7 +301,7 @@ export default function FoldersPage() {
                     type="button"
                     className="button primary"
                     onClick={handleDownload}
-                    disabled={busy !== null || datesInvalid}
+                    disabled={busy !== null || datesInvalid || download !== null}
                   >
                     Télécharger le ZIP
                   </button>
@@ -286,6 +311,14 @@ export default function FoldersPage() {
           </section>
         </div>
       </main>
+      {download && (
+        <DownloadOverlay
+          done={exportProgress.done}
+          total={download.total}
+          status={exportProgress.status}
+          onHide={handleHideDownload}
+        />
+      )}
     </>
   );
 }
