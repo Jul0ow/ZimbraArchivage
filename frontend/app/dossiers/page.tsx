@@ -1,17 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import DownloadOverlay, { useExportProgress } from "@/components/DownloadOverlay";
-import FilterEditor, { EMPTY_FILTER, type FilterDraft, toMessageFilter } from "@/components/FilterEditor";
+import DownloadOverlay from "@/components/DownloadOverlay";
+import ExportForm from "@/components/ExportForm";
 import FolderTree from "@/components/FolderTree";
 import SiteHeader from "@/components/SiteHeader";
 import {
-  ApiError,
-  type ExportOptions,
   type FolderNode,
-  ROOT_FOLDER_ID,
   type Summary,
   exportUrl,
   formatSize,
@@ -21,56 +18,28 @@ import {
   logout,
   newExportId,
 } from "@/lib/api";
+import { useApiErrorHandler } from "@/lib/useApiErrorHandler";
+import { useExportOptions } from "@/lib/useExportOptions";
+import { useExportProgress } from "@/lib/useExportProgress";
 
-// Corbeille et Spam, exclues de l'export de toute la boîte (comme côté backend)
-const EXCLUDED_FROM_MAILBOX = new Set(["3", "4"]);
-
-function countMessages(folder: FolderNode): number {
-  return folder.message_count + folder.children.reduce((sum, c) => sum + countMessages(c), 0);
-}
-
-/** Entrée « Toute la boîte aux lettres », placée avant les dossiers. */
-function mailboxNode(folders: FolderNode[]): FolderNode {
-  const included = folders.filter((f) => !EXCLUDED_FROM_MAILBOX.has(f.id));
-  return {
-    id: ROOT_FOLDER_ID,
-    name: "Toute la boîte aux lettres",
-    path: "/",
-    message_count: included.reduce((sum, f) => sum + countMessages(f), 0),
-    color: null,
-    children: [],
-  };
-}
+// Message associé aux options pour lesquelles il a été affiché
+type Keyed<T> = { key: string | null; value: T };
 
 export default function FoldersPage() {
   const router = useRouter();
   const [username, setUsername] = useState<string | null>(null);
   const [folders, setFolders] = useState<FolderNode[] | null>(null);
-  const [selected, setSelected] = useState<FolderNode | null>(null);
-  const [includeSubfolders, setIncludeSubfolders] = useState(true);
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
-  const [filterDraft, setFilterDraft] = useState<FilterDraft>(EMPTY_FILTER);
-  const [onlyWithAttachments, setOnlyWithAttachments] = useState(false);
-  const [extractAttachments, setExtractAttachments] = useState(false);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const exportState = useExportOptions();
+  const { form, update, options, optionsKey, datesInvalid } = exportState;
+  // Estimation et avis valables seulement pour les options avec lesquelles ils ont été obtenus
+  const [summary, setSummary] = useState<Keyed<Summary> | null>(null);
+  const [notice, setNotice] = useState<Keyed<string> | null>(null);
   const [busy, setBusy] = useState<"summary" | "download" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   // Export en cours de téléchargement, suivi par l'écran d'attente
-  const [download, setDownload] = useState<{ id: string; total: number | null } | null>(null);
-  const exportProgress = useExportProgress(download?.id ?? null);
-
-  const handleError = useCallback(
-    (e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) {
-        router.replace("/");
-        return;
-      }
-      setError(e instanceof ApiError ? e.message : "Erreur inattendue");
-    },
-    [router],
-  );
+  const [downloadId, setDownloadId] = useState<string | null>(null);
+  const exportProgress = useExportProgress(downloadId);
+  const handleError = useApiErrorHandler(setError);
 
   useEffect(() => {
     Promise.all([getMe(), getFolders()])
@@ -81,43 +50,29 @@ export default function FoldersPage() {
       .catch(handleError);
   }, [handleError]);
 
-  const filter = useMemo(() => toMessageFilter(filterDraft), [filterDraft]);
-  const filterKey = JSON.stringify(filter);
-  const treeFolders = useMemo(() => folders && [mailboxNode(folders), ...folders], [folders]);
-  const isMailbox = selected?.id === ROOT_FOLDER_ID;
+  // Fin de l'export : l'écran d'attente laisse place à un message
+  if (downloadId && (exportProgress.status === "finished" || exportProgress.status === "failed")) {
+    setDownloadId(null);
+    if (exportProgress.status === "failed") {
+      setError(`Export interrompu : ${exportProgress.error}. Le détail est dans le fichier erreurs.txt de l'archive.`);
+    } else {
+      setNotice({
+        key: optionsKey,
+        value: "Archive terminée : le fichier ZIP est dans les téléchargements de votre navigateur.",
+      });
+    }
+  }
 
-  // Toute modification des options invalide l'estimation précédente
-  useEffect(() => {
-    setSummary(null);
-    setNotice(null);
-  }, [selected, includeSubfolders, start, end, filterKey, onlyWithAttachments, extractAttachments]);
-
-  useEffect(() => {
-    if (exportProgress.status !== "finished") return;
-    setDownload(null);
-    setNotice("Archive terminée : le fichier ZIP est dans les téléchargements de votre navigateur.");
-  }, [exportProgress.status]);
-
-  const datesInvalid = Boolean(start && end && start > end);
-  const options: ExportOptions | null = selected
-    ? {
-        folderId: selected.id,
-        // Toute la boîte : les dossiers sont forcément inclus
-        includeSubfolders: isMailbox || includeSubfolders,
-        start,
-        end,
-        filter,
-        onlyWithAttachments,
-        extractAttachments,
-      }
-    : null;
+  const currentSummary = summary?.key === optionsKey ? summary.value : null;
+  const currentNotice = notice?.key === optionsKey ? notice.value : null;
 
   async function handleSummary() {
     if (!options) return;
+    const key = optionsKey;
     setError(null);
     setBusy("summary");
     try {
-      setSummary(await getSummary(options));
+      setSummary({ key, value: await getSummary(options) });
     } catch (e) {
       handleError(e);
     } finally {
@@ -128,22 +83,16 @@ export default function FoldersPage() {
   async function handleDownload() {
     if (!options) return;
     setError(null);
+    setNotice(null);
     setBusy("download");
     try {
       // Vérifie que la session est toujours valide avant de lancer le téléchargement
       await getMe();
       const id = newExportId();
-      // La réponse étant une pièce jointe, le navigateur la télécharge sans quitter la page
+      // La réponse étant une pièce jointe, le navigateur la télécharge sans quitter la page.
+      // Le nombre de messages attendus est donné par l'avancement de l'export lui-même.
       window.location.assign(exportUrl(options, id));
-      setDownload({ id, total: summary?.message_count ?? null });
-      if (!summary) {
-        // Nombre de messages attendus, pour la barre de progression
-        getSummary(options)
-          .then(({ message_count }) =>
-            setDownload((d) => (d?.id === id ? { ...d, total: message_count } : d)),
-          )
-          .catch(() => undefined);
-      }
+      setDownloadId(id);
     } catch (e) {
       handleError(e);
     } finally {
@@ -152,11 +101,13 @@ export default function FoldersPage() {
   }
 
   function handleHideDownload() {
-    setDownload(null);
-    setNotice(
-      "Le téléchargement continue : suivez son avancement dans la liste des téléchargements " +
+    setDownloadId(null);
+    setNotice({
+      key: optionsKey,
+      value:
+        "Le téléchargement continue : suivez son avancement dans la liste des téléchargements " +
         "de votre navigateur.",
-    );
+    });
   }
 
   async function handleLogout() {
@@ -164,7 +115,7 @@ export default function FoldersPage() {
     router.replace("/");
   }
 
-  if (!treeFolders) {
+  if (!folders) {
     return (
       <>
         <SiteHeader username={username} onLogout={handleLogout} />
@@ -191,97 +142,27 @@ export default function FoldersPage() {
           <section className="card">
             <h2>Dossiers</h2>
             <FolderTree
-              folders={treeFolders}
-              selectedId={selected?.id ?? null}
-              onSelect={setSelected}
+              folders={folders}
+              selectedId={form.folder?.id ?? null}
+              onSelect={(folder) => update({ folder })}
             />
           </section>
 
           <section className="card">
             <h2>Export</h2>
-            {!selected ? (
+            {!form.folder ? (
               <p className="muted">Sélectionnez un dossier à télécharger.</p>
             ) : (
               <div className="form">
-                {isMailbox ? (
-                  <p>
-                    Export de <strong>toute la boîte aux lettres</strong>{" "}
-                    <span className="muted">(hors Corbeille et Spam)</span>
-                  </p>
-                ) : (
-                  <>
-                    <p>
-                      Dossier sélectionné : <strong>{selected.name}</strong>{" "}
-                      <span className="muted">({selected.path})</span>
-                    </p>
-                    <label className="checkbox">
-                      <input
-                        type="checkbox"
-                        checked={includeSubfolders}
-                        onChange={(e) => setIncludeSubfolders(e.target.checked)}
-                      />
-                      Inclure les sous-dossiers
-                    </label>
-                  </>
-                )}
+                <ExportForm state={exportState} />
 
-                <fieldset className="dates">
-                  <legend>Période (facultatif)</legend>
-                  <label>
-                    Du
-                    <input
-                      type="date"
-                      value={start}
-                      max={end || undefined}
-                      onChange={(e) => setStart(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Au
-                    <input
-                      type="date"
-                      value={end}
-                      min={start || undefined}
-                      onChange={(e) => setEnd(e.target.value)}
-                    />
-                  </label>
-                </fieldset>
-                {datesInvalid && (
-                  <p className="error">La date de début doit précéder la date de fin.</p>
-                )}
-
-                <FilterEditor value={filterDraft} onChange={setFilterDraft} />
-
-                <fieldset className="options">
-                  <legend>Pièces jointes</legend>
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={onlyWithAttachments}
-                      onChange={(e) => setOnlyWithAttachments(e.target.checked)}
-                    />
-                    Uniquement les messages avec pièces jointes
-                  </label>
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={extractAttachments}
-                      onChange={(e) => setExtractAttachments(e.target.checked)}
-                    />
-                    Extraire aussi les pièces jointes dans des fichiers séparés
-                  </label>
-                  <p className="hint muted">
-                    Le fichier .eml contient toujours le message complet avec ses pièces jointes.
-                  </p>
-                </fieldset>
-
-                {summary && (
+                {currentSummary && (
                   <p className="info">
-                    {summary.message_count} message(s) dans {summary.folder_count} dossier(s),{" "}
-                    {formatSize(summary.total_size)} environ.
+                    {currentSummary.message_count} message(s) dans {currentSummary.folder_count}{" "}
+                    dossier(s), {formatSize(currentSummary.total_size)} environ.
                   </p>
                 )}
-                {notice && <p className="info">{notice}</p>}
+                {currentNotice && <p className="info">{currentNotice}</p>}
                 {error && (
                   <p className="error" role="alert">
                     {error}
@@ -301,7 +182,7 @@ export default function FoldersPage() {
                     type="button"
                     className="button primary"
                     onClick={handleDownload}
-                    disabled={busy !== null || datesInvalid || download !== null}
+                    disabled={busy !== null || datesInvalid || downloadId !== null}
                   >
                     Télécharger le ZIP
                   </button>
@@ -311,14 +192,7 @@ export default function FoldersPage() {
           </section>
         </div>
       </main>
-      {download && (
-        <DownloadOverlay
-          done={exportProgress.done}
-          total={download.total}
-          status={exportProgress.status}
-          onHide={handleHideDownload}
-        />
-      )}
+      {downloadId && <DownloadOverlay progress={exportProgress} onHide={handleHideDownload} />}
     </>
   );
 }

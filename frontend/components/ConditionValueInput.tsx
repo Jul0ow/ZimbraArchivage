@@ -2,9 +2,14 @@
 
 import { type KeyboardEvent, useEffect, useId, useState } from "react";
 
-import { type AddressSuggestion, type FilterCondition, getAddressSuggestions } from "@/lib/api";
+import {
+  type AddressSuggestion,
+  type FilterCondition,
+  MAX_FILTER_VALUE_LENGTH,
+  getAddressSuggestions,
+} from "@/lib/api";
 
-// Suggestions demandées à partir de 2 caractères, une fois la saisie interrompue
+// Suggestions demandées à partir de 2 caractères (minimum du backend), une fois la saisie interrompue
 const MIN_QUERY_LENGTH = 2;
 const QUERY_DELAY_MS = 250;
 
@@ -18,7 +23,8 @@ type Props = {
 /** Valeur d'une condition, avec suggestions d'adresses pour l'expéditeur et le destinataire. */
 export default function ConditionValueInput({ field, value, placeholder, onChange }: Props) {
   const listId = useId();
-  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+  // Suggestions reçues, associées à la saisie pour laquelle elles ont été demandées
+  const [found, setFound] = useState<{ query: string; items: AddressSuggestion[] } | null>(null);
   // Liste ouverte pendant la saisie, refermée au choix d'une adresse ou en quittant le champ
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -26,24 +32,26 @@ export default function ConditionValueInput({ field, value, placeholder, onChang
   const query = value.trim();
   const addressField = field === "subject" ? null : field;
 
+  const enabled = open && addressField !== null && query.length >= MIN_QUERY_LENGTH;
+  const suggestions = enabled && found?.query === query ? found.items : [];
+
   useEffect(() => {
-    if (!open || !addressField || query.length < MIN_QUERY_LENGTH) {
-      setSuggestions([]);
-      return;
-    }
-    let cancelled = false;
+    if (!open || !addressField || query.length < MIN_QUERY_LENGTH) return;
+    // La requête devenue inutile (nouvelle saisie) est annulée, et non simplement ignorée
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      getAddressSuggestions(query, addressField)
-        .then((found) => {
-          if (cancelled) return;
-          setSuggestions(found);
+      getAddressSuggestions(query, addressField, controller.signal)
+        .then((items) => {
+          setFound({ query, items });
           setActive(-1);
         })
         // Les suggestions sont facultatives : une erreur n'empêche pas la saisie
-        .catch(() => !cancelled && setSuggestions([]));
+        .catch(() => {
+          if (!controller.signal.aborted) setFound({ query, items: [] });
+        });
     }, QUERY_DELAY_MS);
     return () => {
-      cancelled = true;
+      controller.abort();
       clearTimeout(timer);
     };
   }, [open, addressField, query]);
@@ -76,7 +84,7 @@ export default function ConditionValueInput({ field, value, placeholder, onChang
       <input
         type="text"
         aria-label="Valeur"
-        maxLength={200}
+        maxLength={MAX_FILTER_VALUE_LENGTH}
         placeholder={placeholder}
         value={value}
         autoComplete="off"

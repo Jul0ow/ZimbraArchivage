@@ -12,16 +12,31 @@ export type FolderNode = {
   children: FolderNode[];
 };
 
-// Dossier racine Zimbra : le choisir revient à exporter toute la boîte aux lettres
+// Dossier racine Zimbra : le choisir revient à exporter toute la boîte aux lettres.
+// L'entrée correspondante, avec son nombre de messages, est fournie par le backend.
 export const ROOT_FOLDER_ID = "1";
 
-export type LogicalOperator = "and" | "or";
+// Limites d'un filtre, les mêmes que MessageFilter côté backend (backend/app/filters.py)
+export const MAX_FILTER_GROUPS = 10;
+export const MAX_GROUP_CONDITIONS = 20;
+export const MAX_FILTER_VALUE_LENGTH = 200;
+
+export const LOGICAL_OPERATORS = ["and", "or"] as const;
+export type LogicalOperator = (typeof LOGICAL_OPERATORS)[number];
+
+export const FILTER_FIELDS = ["subject", "from", "to"] as const;
+export const CONDITION_OPERATORS = ["contains", "not_contains"] as const;
 
 export type FilterCondition = {
-  field: "subject" | "from" | "to";
-  operator: "contains" | "not_contains";
+  field: (typeof FILTER_FIELDS)[number];
+  operator: (typeof CONDITION_OPERATORS)[number];
   value: string;
 };
+
+/** Vérifie qu'une valeur saisie (ex. option d'un select) fait partie des valeurs permises. */
+export function isOneOf<T extends string>(values: readonly T[], value: string): value is T {
+  return (values as readonly string[]).includes(value);
+}
 
 export type FilterGroup = {
   operator: LogicalOperator;
@@ -60,7 +75,11 @@ export type Summary = {
 export type ExportProgress = {
   // Nombre de courriels traités (ajoutés à l'archive ou en erreur)
   done: number;
+  // Nombre de courriels à traiter, null tant que les dossiers sont parcourus
+  total: number | null;
   finished: boolean;
+  // Raison d'un export interrompu avant la fin (session expirée, Zimbra indisponible…)
+  error: string | null;
 };
 
 export class ApiError extends Error {
@@ -72,7 +91,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function send(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(path, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
@@ -92,13 +111,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, message);
   }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return response.json() as Promise<T>;
+  return response;
 }
 
-function exportQuery(options: ExportOptions): string {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Le contenu est celui décrit par l'API du backend : il n'est pas revérifié ici
+  return (await send(path, init)).json() as Promise<T>;
+}
+
+async function requestNoContent(path: string, init?: RequestInit): Promise<void> {
+  await send(path, init);
+}
+
+export function exportQuery(options: ExportOptions): string {
   const params = new URLSearchParams({
     folder_id: options.folderId,
     include_subfolders: String(options.includeSubfolders),
@@ -117,14 +142,16 @@ export const login = (username: string, password: string) =>
     body: JSON.stringify({ username, password }),
   });
 
-export const logout = () => request<void>("/api/auth/logout", { method: "POST" });
+export const logout = () => requestNoContent("/api/auth/logout", { method: "POST" });
 
 export const getMe = () => request<User>("/api/auth/me");
 
 export const getFolders = () => request<FolderNode[]>("/api/folders");
 
-export const getAddressSuggestions = (query: string, field: "from" | "to") =>
-  request<AddressSuggestion[]>(`/api/addresses?${new URLSearchParams({ q: query, field })}`);
+export const getAddressSuggestions = (query: string, field: "from" | "to", signal?: AbortSignal) =>
+  request<AddressSuggestion[]>(`/api/addresses?${new URLSearchParams({ q: query, field })}`, {
+    signal,
+  });
 
 export const getSummary = (options: ExportOptions) =>
   request<Summary>(`/api/export/summary?${exportQuery(options)}`);

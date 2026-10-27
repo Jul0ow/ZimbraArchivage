@@ -3,7 +3,17 @@
 import { Fragment } from "react";
 
 import ConditionValueInput from "@/components/ConditionValueInput";
-import type { FilterCondition, LogicalOperator, MessageFilter } from "@/lib/api";
+import {
+  CONDITION_OPERATORS,
+  FILTER_FIELDS,
+  type FilterCondition,
+  LOGICAL_OPERATORS,
+  type LogicalOperator,
+  MAX_FILTER_GROUPS,
+  MAX_GROUP_CONDITIONS,
+  type MessageFilter,
+  isOneOf,
+} from "@/lib/api";
 
 // Brouillon édité dans le formulaire : chaque élément porte une clé stable pour React
 export type ConditionDraft = FilterCondition & { key: number };
@@ -31,6 +41,7 @@ const OPERATOR_LABELS: Record<FilterCondition["operator"], string> = {
 
 const LOGICAL_LABELS: Record<LogicalOperator, string> = { and: "ET", or: "OU" };
 
+// Clés React des groupes et conditions, uniques pour la page
 let lastKey = 0;
 const newKey = () => ++lastKey;
 
@@ -73,11 +84,13 @@ export function describeFilter(filter: MessageFilter): string {
 
 type Props = {
   value: FilterDraft;
+  // Filtre envoyé à l'API, calculé à partir de value par toMessageFilter
+  filter: MessageFilter | null;
   onChange: (value: FilterDraft) => void;
 };
 
-export default function FilterEditor({ value, onChange }: Props) {
-  const filter = toMessageFilter(value);
+export default function FilterEditor({ value, filter, onChange }: Props) {
+  const canAddGroup = value.groups.length < MAX_FILTER_GROUPS;
 
   function updateGroup(key: number, update: (group: GroupDraft) => GroupDraft | null) {
     const groups = value.groups.flatMap((group) => {
@@ -101,7 +114,7 @@ export default function FilterEditor({ value, onChange }: Props) {
       <legend>Filtres (facultatif)</legend>
       <p className="hint muted">
         Recherche par mots, comme dans Zimbra. Ajoutez * pour chercher un début de mot (ex. budg*).
-        Le destinataire couvre les champs À et Cc. Pour l'expéditeur et le destinataire, des
+        Le destinataire couvre les champs À et Cc. Pour l’expéditeur et le destinataire, des
         adresses sont proposées dès les premières lettres.
       </p>
 
@@ -110,7 +123,10 @@ export default function FilterEditor({ value, onChange }: Props) {
           Les messages doivent respecter
           <select
             value={value.operator}
-            onChange={(e) => onChange({ ...value, operator: e.target.value as LogicalOperator })}
+            onChange={(e) => {
+              const operator = e.target.value;
+              if (isOneOf(LOGICAL_OPERATORS, operator)) onChange({ ...value, operator });
+            }}
           >
             <option value="or">au moins un des groupes (OU)</option>
             <option value="and">tous les groupes (ET)</option>
@@ -130,12 +146,12 @@ export default function FilterEditor({ value, onChange }: Props) {
                     <select
                       aria-label={`Opérateur du groupe ${index + 1}`}
                       value={group.operator}
-                      onChange={(e) =>
-                        updateGroup(group.key, (g) => ({
-                          ...g,
-                          operator: e.target.value as LogicalOperator,
-                        }))
-                      }
+                      onChange={(e) => {
+                        const operator = e.target.value;
+                        if (isOneOf(LOGICAL_OPERATORS, operator)) {
+                          updateGroup(group.key, (g) => ({ ...g, operator }));
+                        }
+                      }}
                     >
                       <option value="and">toutes les conditions (ET)</option>
                       <option value="or">au moins une condition (OU)</option>
@@ -161,11 +177,12 @@ export default function FilterEditor({ value, onChange }: Props) {
                       <select
                         aria-label="Champ"
                         value={condition.field}
-                        onChange={(e) =>
-                          updateCondition(group.key, condition.key, {
-                            field: e.target.value as FilterCondition["field"],
-                          })
-                        }
+                        onChange={(e) => {
+                          const field = e.target.value;
+                          if (isOneOf(FILTER_FIELDS, field)) {
+                            updateCondition(group.key, condition.key, { field });
+                          }
+                        }}
                       >
                         {Object.entries(FIELD_LABELS).map(([field, label]) => (
                           <option key={field} value={field}>
@@ -176,11 +193,12 @@ export default function FilterEditor({ value, onChange }: Props) {
                       <select
                         aria-label="Opérateur"
                         value={condition.operator}
-                        onChange={(e) =>
-                          updateCondition(group.key, condition.key, {
-                            operator: e.target.value as FilterCondition["operator"],
-                          })
-                        }
+                        onChange={(e) => {
+                          const operator = e.target.value;
+                          if (isOneOf(CONDITION_OPERATORS, operator)) {
+                            updateCondition(group.key, condition.key, { operator });
+                          }
+                        }}
                       >
                         {Object.entries(OPERATOR_LABELS).map(([operator, label]) => (
                           <option key={operator} value={operator}>
@@ -216,6 +234,12 @@ export default function FilterEditor({ value, onChange }: Props) {
                   <button
                     type="button"
                     className="button small subtle"
+                    disabled={group.conditions.length >= MAX_GROUP_CONDITIONS}
+                    title={
+                      group.conditions.length >= MAX_GROUP_CONDITIONS
+                        ? `${MAX_GROUP_CONDITIONS} conditions au plus par groupe`
+                        : undefined
+                    }
                     onClick={() =>
                       updateGroup(group.key, (g) => ({
                         ...g,
@@ -236,6 +260,8 @@ export default function FilterEditor({ value, onChange }: Props) {
         <button
           type="button"
           className="button small"
+          disabled={!canAddGroup}
+          title={canAddGroup ? undefined : `${MAX_FILTER_GROUPS} groupes au plus`}
           onClick={() => onChange({ ...value, groups: [...value.groups, newGroup()] })}
         >
           {value.groups.length === 0 ? "+ Ajouter un filtre" : "+ Ajouter un groupe de conditions"}
