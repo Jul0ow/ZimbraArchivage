@@ -83,3 +83,12 @@ def test_session_cipher_without_secret_generates_a_key():
     cipher = SessionCipher("", max_age=60)
 
     assert cipher.open(cipher.seal("jeton")) == "jeton"
+
+
+def test_ip_limit_can_be_disabled():
+    throttle = LoginThrottle(max_per_user=100, max_per_ip=0)
+
+    for i in range(50):
+        throttle.record_failure(f"user{i}@test.fr", "10.0.0.1")
+
+    assert not throttle.is_blocked("autre@test.fr", "10.0.0.1")

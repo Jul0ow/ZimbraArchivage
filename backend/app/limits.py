@@ -71,7 +71,7 @@ class LoginThrottle:
 
     def _keys(self, username: str, ip: str | None) -> list[tuple[str, str]]:
         keys = [("user", username.strip().lower())]
-        if ip:
+        if ip and self._max["ip"] > 0:
             keys.append(("ip", ip))
         return keys
 

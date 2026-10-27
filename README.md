@@ -115,8 +115,8 @@ limité au chemin `/api`. Un cookie copié n'est donc pas utilisable directement
 La session dure au plus `SESSION_MAX_AGE` (8 h par défaut), et la déconnexion ferme aussi la
 session Zimbra.
 
-Garde-fous : 5 connexions échouées par identifiant (20 par adresse IP) bloquent les nouvelles
-tentatives pendant 5 minutes ; chaque session peut lancer 2 exports ou estimations à la fois,
+Garde-fous : 5 connexions échouées par identifiant bloquent les nouvelles tentatives pendant
+5 minutes (une limite par adresse IP est possible, voir `MAX_LOGIN_FAILURES_PER_IP`) ; chaque session peut lancer 2 exports ou estimations à la fois,
 et le backend 6 au total (réponse 429 au-delà) ; un export ne peut pas être lancé depuis un
 autre site (`Sec-Fetch-Site`).
 
@@ -155,11 +155,11 @@ Variables d'environnement (voir `backend/.env.example`) :
 | `MAX_EXPORTS_PER_SESSION` | `2` | Exports et estimations simultanés par session |
 | `MAX_ATTACHMENT_EXTRACTION_SIZE` | `26214400` | Taille (octets) au-delà de laquelle les PJ ne sont pas extraites |
 | `MAX_LOGIN_FAILURES_PER_USER` | `5` | Connexions échouées tolérées par identifiant sur 5 minutes |
-| `MAX_LOGIN_FAILURES_PER_IP` | `20` | Connexions échouées tolérées par adresse IP sur 5 minutes |
+| `MAX_LOGIN_FAILURES_PER_IP` | `0` | Connexions échouées tolérées par adresse IP sur 5 minutes (`0` : pas de limite). À n'activer qu'avec `FORWARDED_ALLOW_IPS` restreint aux proxys de confiance |
 | `COOKIE_SECURE` | `true` | Cookie de session réservé à HTTPS (`false` en dev HTTP uniquement) |
 | `SESSION_MAX_AGE` | `28800` | Durée maximale d'une session (secondes) |
 | `SESSION_SECRET` | (aléatoire) | Clé Fernet de chiffrement des sessions ; sans elle, les sessions sont perdues au redémarrage et non partagées entre réplicas |
-| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxys de confiance pour `X-Forwarded-For` (lu par uvicorn) |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxys de confiance pour `X-Forwarded-For` (lu par uvicorn) : adresses de l'ingress-controller, jamais `*` |
 | `ENABLE_DOCS` | `false` | Documentation OpenAPI sur `/api/docs` |
 
 Une clé `SESSION_SECRET` se génère avec

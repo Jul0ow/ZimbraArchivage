@@ -26,10 +26,13 @@ config:
   cookieSecure: true
   # Durée maximale d'une session, en secondes
   sessionMaxAge: 28800
-  # Proxys dont l'en-tête X-Forwarded-For est pris en compte (adresse IP réelle des
-  # utilisateurs pour la limite de tentatives de connexion). "*" convient quand seul
-  # l'ingress peut joindre le backend (networkPolicy.enabled)
-  forwardedAllowIps: "*"
+  # Connexions échouées tolérées sur 5 minutes par adresse IP (0 : pas de limite par IP ;
+  # la limite par identifiant s'applique toujours)
+  maxLoginFailuresPerIp: 0
+  # Proxys dont l'en-tête X-Forwarded-For est pris en compte : adresses (ou CIDR) des pods de
+  # l'ingress-controller, à renseigner avant d'activer maxLoginFailuresPerIp. Ne pas mettre "*" :
+  # tout client joignant le backend pourrait alors choisir son adresse IP
+  forwardedAllowIps: ""
 
 session:
   # Clé de chiffrement des sessions (Fernet, 32 octets en base64 urlsafe). Vide : une clé est

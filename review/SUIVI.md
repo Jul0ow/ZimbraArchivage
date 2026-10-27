@@ -16,7 +16,7 @@
 | Téléchargements séquentiels | Fenêtre de téléchargements parallèles (`DOWNLOAD_CONCURRENCY`) |
 | Logout sans `EndSessionRequest` | Appelé à la déconnexion |
 | Jeton brut dans le cookie | Chiffré (Fernet, `SESSION_SECRET`), session plafonnée à 8 h, `SameSite=Strict` |
-| Pas de limite au login | Par identifiant et par IP, `X-Originating-IP` transmis à Zimbra |
+| Pas de limite au login | Par identifiant (par IP en option, avec proxys de confiance explicites), `X-Originating-IP` transmis à Zimbra |
 | Compose sur 0.0.0.0 | Publication sur 127.0.0.1, tmpfs borné, variables relayées |
 | Ingress sans TLS, pas d'en-têtes | Rendu refusé sans TLS si cookie Secure, `ssl-redirect`, CSP/HSTS/nosniff/frame côté Next et API |
 | Double recherche estimation/export | Le total vient de l'avancement de l'export |

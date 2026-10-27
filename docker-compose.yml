@@ -23,8 +23,6 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-}
       # L'application est servie en HTTP sur le poste : le cookie ne peut pas être Secure
       COOKIE_SECURE: "false"
-      # Le backend n'est joignable que par le frontend, qui relaie l'adresse du navigateur
-      FORWARDED_ALLOW_IPS: "*"
     read_only: true
     tmpfs:
       # En mémoire : taille bornée pour les .eml de plus de 10 Mo en cours de téléchargement

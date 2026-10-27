@@ -18,4 +18,7 @@ data:
   MAX_EXPORTS_PER_SESSION: {{ .Values.config.maxExportsPerSession | quote }}
   MAX_ATTACHMENT_EXTRACTION_SIZE: {{ .Values.config.maxAttachmentExtractionSize | int64 | quote }}
   SESSION_MAX_AGE: {{ .Values.config.sessionMaxAge | quote }}
-  FORWARDED_ALLOW_IPS: {{ .Values.config.forwardedAllowIps | quote }}
+  MAX_LOGIN_FAILURES_PER_IP: {{ .Values.config.maxLoginFailuresPerIp | quote }}
+  {{- with .Values.config.forwardedAllowIps }}
+  FORWARDED_ALLOW_IPS: {{ . | quote }}
+  {{- end }}

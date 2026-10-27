@@ -108,7 +108,7 @@ def client(zimbra: FakeZimbra, settings: Settings, registry: ProgressRegistry, l
     )
     app.dependency_overrides[get_progress_registry] = lambda: registry
     app.dependency_overrides[get_export_limiter] = lambda: limiter
-    throttle = LoginThrottle(settings.max_login_failures_per_user, settings.max_login_failures_per_ip)
+    throttle = LoginThrottle(settings.max_login_failures_per_user, 20)
     app.dependency_overrides[get_login_throttle] = lambda: throttle
     try:
         with TestClient(app) as test_client:

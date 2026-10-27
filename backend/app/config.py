@@ -34,9 +34,12 @@ class Settings(BaseSettings):
     # Au-delà de cette taille (en octets), les pièces jointes d'un courriel ne sont pas extraites
     max_attachment_extraction_size: int = Field(default=25 * 1024 * 1024, ge=0)
 
-    # Tentatives de connexion échouées tolérées sur 5 minutes, par identifiant et par adresse IP
+    # Tentatives de connexion échouées tolérées sur 5 minutes, par identifiant
     max_login_failures_per_user: int = Field(default=5, ge=1)
-    max_login_failures_per_ip: int = Field(default=20, ge=1)
+    # Et par adresse IP (0 : pas de limite). À n'activer qu'avec FORWARDED_ALLOW_IPS limité aux
+    # proxys de confiance : sinon tous les utilisateurs partagent l'adresse du proxy, ou
+    # l'adresse peut être falsifiée par l'en-tête X-Forwarded-For
+    max_login_failures_per_ip: int = Field(default=0, ge=0)
 
     # Attribut Secure du cookie de session (à désactiver uniquement en développement HTTP)
     cookie_secure: bool = True
