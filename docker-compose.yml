@@ -28,7 +28,8 @@ services:
       # En mémoire : taille bornée pour les .eml de plus de 10 Mo en cours de téléchargement
       - /tmp:size=512m
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      # Forme chaîne (shell) plutôt que liste CMD : podman-compose interprète mal cette dernière
+      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
       interval: 10s
       timeout: 5s
       retries: 3
