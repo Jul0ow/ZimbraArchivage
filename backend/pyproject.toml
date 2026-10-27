@@ -1,0 +1,28 @@
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I", "SIM", "RET", "C90"]
+
+[tool.ruff.lint.per-file-ignores]
+# Données de test (arborescence Zimbra, messages) plus lisibles sur une ligne
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+filterwarnings = [
+    "error",
+    # TestClient de Starlette avec httpx : avertissement de dépréciation connu
+    "ignore::DeprecationWarning:fastapi.testclient",
+    "ignore:Using `httpx` with `starlette.testclient`",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true

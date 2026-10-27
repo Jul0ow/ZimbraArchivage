@@ -5,11 +5,14 @@ correspondants habituels), puis les adresses des messages récents de la boîte,
 couvre aussi les expéditeurs qui ne sont pas dans les contacts.
 """
 
+import logging
 from collections.abc import Callable
 from typing import Literal
 
 from app.filters import FIELD_PREFIXES, RESERVED_WORDS, SIMPLE_VALUE
 from app.zimbra import EmailAddress, SessionExpired, ZimbraClient, ZimbraError
+
+logger = logging.getLogger(__name__)
 
 AddressField = Literal["from", "to"]
 
@@ -31,13 +34,12 @@ def _safe(source: Callable[[], list[EmailAddress]]) -> list[EmailAddress]:
         return source()
     except SessionExpired:
         raise
-    except ZimbraError:
+    except ZimbraError as e:
+        logger.info("Suggestions d'adresses : source ignorée (%s)", e.code or e.message)
         return []
 
 
-def _from_messages(
-    client: ZimbraClient, token: str, text: str, field: AddressField
-) -> list[EmailAddress]:
+def _from_messages(client: ZimbraClient, token: str, text: str, field: AddressField) -> list[EmailAddress]:
     # Recherche sur un début de mot, possible seulement pour une valeur sans guillemets
     if not SIMPLE_VALUE.match(text) or "*" in text or text.lower() in RESERVED_WORDS:
         return []

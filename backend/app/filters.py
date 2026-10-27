@@ -13,14 +13,22 @@ from pydantic import BaseModel, Field, StringConstraints
 # Critères de la recherche Zimbra : tocc couvre les champs À et Cc
 FIELD_PREFIXES = {"subject": "subject", "from": "from", "to": "tocc"}
 
-# Valeur utilisable sans guillemets, ce qui permet aussi le joker de préfixe (ex. budg*)
-SIMPLE_VALUE = re.compile(r"^[\w@.+*-]+$")
+# Valeur utilisable sans guillemets : commence par une lettre ou un chiffre (un - ou un +
+# initial serait lu comme un opérateur) et ne porte le joker de préfixe qu'à la fin (ex. budg*)
+SIMPLE_VALUE = re.compile(r"^\w[\w@.+-]*\*?$")
 
 # Mots réservés de la syntaxe de recherche, à mettre entre guillemets
 RESERVED_WORDS = {"and", "or", "not"}
 
+# Limites d'un filtre, reprises par l'interface (frontend/lib/api.ts)
+MAX_VALUE_LENGTH = 200
+MAX_CONDITIONS_PER_GROUP = 20
+MAX_GROUPS = 10
+
 Operator = Literal["and", "or"]
-FilterValue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+FilterValue = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_VALUE_LENGTH)
+]
 
 
 def quote_value(value: str) -> str:
@@ -42,7 +50,7 @@ class Condition(BaseModel):
 
 class ConditionGroup(BaseModel):
     operator: Operator = "and"
-    conditions: list[Condition] = Field(min_length=1, max_length=20)
+    conditions: list[Condition] = Field(min_length=1, max_length=MAX_CONDITIONS_PER_GROUP)
 
     def query(self) -> str:
         return "(" + f" {self.operator} ".join(c.query() for c in self.conditions) + ")"
@@ -50,7 +58,7 @@ class ConditionGroup(BaseModel):
 
 class MessageFilter(BaseModel):
     operator: Operator = "or"
-    groups: list[ConditionGroup] = Field(min_length=1, max_length=10)
+    groups: list[ConditionGroup] = Field(min_length=1, max_length=MAX_GROUPS)
 
     def query(self) -> str:
         return "(" + f" {self.operator} ".join(g.query() for g in self.groups) + ")"
