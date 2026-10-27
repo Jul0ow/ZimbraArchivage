@@ -13,3 +13,9 @@ data:
   MAX_FILE_NAME_LENGTH: {{ .Values.config.maxFileNameLength | quote }}
   HTTP_TIMEOUT: {{ .Values.config.httpTimeout | quote }}
   COOKIE_SECURE: {{ .Values.config.cookieSecure | quote }}
+  DOWNLOAD_CONCURRENCY: {{ .Values.config.downloadConcurrency | quote }}
+  MAX_CONCURRENT_EXPORTS: {{ .Values.config.maxConcurrentExports | quote }}
+  MAX_EXPORTS_PER_SESSION: {{ .Values.config.maxExportsPerSession | quote }}
+  MAX_ATTACHMENT_EXTRACTION_SIZE: {{ .Values.config.maxAttachmentExtractionSize | int64 | quote }}
+  SESSION_MAX_AGE: {{ .Values.config.sessionMaxAge | quote }}
+  FORWARDED_ALLOW_IPS: {{ .Values.config.forwardedAllowIps | quote }}

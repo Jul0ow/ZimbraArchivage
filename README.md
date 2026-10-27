@@ -13,11 +13,15 @@ Elle reprend la méthode d'échange avec Zimbra du projet
 | --- | --- |
 | Connexion | SOAP `AuthRequest` (`urn:zimbraAccount`), le jeton obtenu est passé dans le cookie `ZM_AUTH_TOKEN` |
 | Liste des dossiers | SOAP `GetFolderRequest` (les partages montés `link` et les dossiers de recherche `search` sont ignorés) |
-| Recherche des messages | SOAP `SearchRequest` paginé (`inid:<dossier>` et filtres, lots de 500 par défaut) |
+| Recherche des messages | SOAP `SearchRequest` trié par date croissante et paginé par curseur (`inid:<dossier>` et filtres, lots de 500 par défaut) |
 | Téléchargement d'un message | ReST `GET /service/home/~/?id=<id>` au format `.eml` |
 | Suggestions d'adresses des filtres | SOAP `AutoCompleteRequest` (contacts, liste globale, correspondants habituels) puis `SearchRequest` (`from:<début>*` ou `tocc:<début>*`, adresses des 100 messages les plus récents) |
+| Déconnexion | SOAP `EndSessionRequest` (`logoff="1"`) : le jeton Zimbra n'est plus utilisable |
 
-Comme dans Archivage, les appels sont retentés (jusqu'à 5 fois) si Zimbra répond 502, 503 ou 504.
+Comme dans Archivage, les appels sont retentés si Zimbra répond 502, 503 ou 504, et aussi si
+Zimbra est injoignable : jusqu'à 5 nouvelles tentatives, après 1, 2, 4, 8 puis 16 secondes
+(ou le délai `Retry-After` de Zimbra, plafonné à 30 s). Un export s'arrête après
+20 téléchargements consécutifs en échec.
 L'API SOAP est appelée dans sa variante JSON (même point d'entrée `/service/soap`).
 
 ## Contenu de l'archive ZIP
@@ -63,13 +67,20 @@ Options d'export :
 - **uniquement les messages avec pièces jointes** ;
 - **extraire les pièces jointes** dans des fichiers séparés.
 
-L'archive est construite et envoyée au fil de l'eau : rien n'est stocké côté serveur.
+L'archive est construite et envoyée au fil de l'eau : rien n'est stocké côté serveur. Les
+messages de tous les dossiers sont d'abord recensés (ce qui fige la liste et donne le total
+affiché pendant le téléchargement), puis téléchargés à plusieurs en parallèle
+(`DOWNLOAD_CONCURRENCY`) et ajoutés dans l'ordre.
 Pendant le téléchargement, un écran d'attente affiche le nombre de messages déjà ajoutés à
 l'archive et se ferme une fois l'archive terminée. Cet avancement est gardé en mémoire par le
 backend : avec plusieurs réplicas, l'écran se contente d'une attente simple si l'avancement est
 suivi par un autre réplica.
 Si certains messages n'ont pas pu être téléchargés, ils sont listés dans un fichier
-`erreurs.txt` à la racine de l'archive.
+`erreurs.txt` à la racine de l'archive. Si l'export est interrompu (session Zimbra expirée,
+Zimbra qui ne répond plus), la première ligne de `erreurs.txt` commence par
+`EXPORT INTERROMPU` et l'écran d'attente l'indique : l'archive est alors incomplète.
+Les pièces jointes d'un courriel de plus de 25 Mo (`MAX_ATTACHMENT_EXTRACTION_SIZE`) ne sont
+pas extraites ; elles restent dans le `.eml`.
 
 ## Architecture
 
@@ -79,7 +90,8 @@ navigateur ──► Next.js (frontend/, port 3000) ──/api/*──► FastAP
 
 - `backend/` : API FastAPI (Python 3.13).
   - `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-  - `GET /api/folders` : arborescence des dossiers de mails
+  - `GET /api/folders` : arborescence des dossiers de mails, précédée de l'entrée
+    « Toute la boîte aux lettres » (`id` 1, nombre de messages hors Corbeille et Spam)
   - `GET /api/addresses?q=…&field=from|to` : adresses suggérées (10 au plus) pour les filtres
   - `GET /api/export/summary` : nombre de messages et taille estimée d'un export
   - `GET /api/export?folder_id=…&include_subfolders=…&start=AAAA-MM-JJ&end=AAAA-MM-JJ` : archive ZIP
@@ -89,16 +101,24 @@ navigateur ──► Next.js (frontend/, port 3000) ──/api/*──► FastAP
     "operator": "contains", "value": "facture"}]}]}` (champs `subject`, `from`, `to` ;
     opérateurs `contains`, `not_contains`)
   - `GET /api/export/progress?export_id=…` : avancement d'un export lancé avec le paramètre
-    `export_id` (identifiant choisi par l'interface), visible de la seule session qui l'a lancé
-  - Documentation OpenAPI : `/api/docs`
+    `export_id` (identifiant choisi par l'interface), visible de la seule session qui l'a lancé :
+    messages traités, total, fin et raison d'une interruption
+  - Documentation OpenAPI : `/api/docs`, uniquement avec la variable `ENABLE_DOCS=true`
 - `frontend/` : interface Next.js (App Router). Les appels `/api/*` sont relayés vers le
   backend (`BACKEND_URL`, lu à l'exécution). En Kubernetes, l'ingress envoie directement
   `/api` au backend.
 - `charts/zimbra-archivage/` : chart Helm.
 
-Le mot de passe n'est jamais stocké : seul le jeton Zimbra est conservé, dans un cookie
-`HttpOnly`, `SameSite=Lax` et `Secure` (par défaut), limité au chemin `/api`. La session dure
-le temps de vie du jeton Zimbra.
+Le mot de passe n'est jamais stocké : seul le jeton Zimbra est conservé, **chiffré** avec la
+clé `SESSION_SECRET`, dans un cookie `HttpOnly`, `SameSite=Strict` et `Secure` (par défaut),
+limité au chemin `/api`. Un cookie copié n'est donc pas utilisable directement sur Zimbra.
+La session dure au plus `SESSION_MAX_AGE` (8 h par défaut), et la déconnexion ferme aussi la
+session Zimbra.
+
+Garde-fous : 5 connexions échouées par identifiant (20 par adresse IP) bloquent les nouvelles
+tentatives pendant 5 minutes ; chaque session peut lancer 2 exports ou estimations à la fois,
+et le backend 6 au total (réponse 429 au-delà) ; un export ne peut pas être lancé depuis un
+autre site (`Sec-Fetch-Site`).
 
 ## Test rapide avec Docker Compose
 
@@ -107,9 +127,12 @@ cp .env.example .env     # renseigner ZIMBRA_SOAP_URL et ZIMBRA_REST_URL
 docker compose up -d     # utilise les images publiées sur GHCR
 ```
 
-Puis ouvrir http://localhost:3000/. Options utiles dans `.env` : `ARCHIVAGE_VERSION`
-(version des images, `latest` par défaut), `ARCHIVAGE_PORT` (port local, `3000` par défaut)
-et `VERIFY_TLS=false` si le certificat du serveur Zimbra est interne ou auto-signé.
+Puis ouvrir http://localhost:3000/. L'application n'est publiée que sur `127.0.0.1` : elle
+est servie en HTTP, les mots de passe ne doivent pas circuler en clair sur le réseau.
+Options utiles dans `.env` : `ARCHIVAGE_VERSION` (version des images, `latest` = dernière
+version stable), `ARCHIVAGE_PORT` (port local, `3000` par défaut), `SESSION_SECRET` (pour
+garder les sessions après un redémarrage) et `VERIFY_TLS=false` si le certificat du serveur
+Zimbra est interne ou auto-signé.
 
 Pour tester les sources du dépôt plutôt que les images publiées :
 `docker compose up -d --build`. Arrêt : `docker compose down`.
@@ -125,9 +148,25 @@ Variables d'environnement (voir `backend/.env.example`) :
 | `ZONE_ID` | `Europe/Paris` | Fuseau des filtres de dates et des noms de fichiers |
 | `SEARCH_BATCH_SIZE` | `500` | Messages par page de `SearchRequest` |
 | `MAX_FILE_NAME_LENGTH` | `50` | Longueur maximale des noms de `.eml` (50 à 180) |
-| `HTTP_TIMEOUT` | `120` | Délai maximal d'un appel à Zimbra (secondes) |
+| `HTTP_TIMEOUT` | `120` | Délai maximal d'un appel à Zimbra (secondes ; 10 s pour établir la connexion) |
 | `VERIFY_TLS` | `true` | Vérification du certificat de Zimbra |
+| `DOWNLOAD_CONCURRENCY` | `4` | Courriels téléchargés en parallèle par export (1 à 16) |
+| `MAX_CONCURRENT_EXPORTS` | `6` | Exports et estimations simultanés, pour tout le backend |
+| `MAX_EXPORTS_PER_SESSION` | `2` | Exports et estimations simultanés par session |
+| `MAX_ATTACHMENT_EXTRACTION_SIZE` | `26214400` | Taille (octets) au-delà de laquelle les PJ ne sont pas extraites |
+| `MAX_LOGIN_FAILURES_PER_USER` | `5` | Connexions échouées tolérées par identifiant sur 5 minutes |
+| `MAX_LOGIN_FAILURES_PER_IP` | `20` | Connexions échouées tolérées par adresse IP sur 5 minutes |
 | `COOKIE_SECURE` | `true` | Cookie de session réservé à HTTPS (`false` en dev HTTP uniquement) |
+| `SESSION_MAX_AGE` | `28800` | Durée maximale d'une session (secondes) |
+| `SESSION_SECRET` | (aléatoire) | Clé Fernet de chiffrement des sessions ; sans elle, les sessions sont perdues au redémarrage et non partagées entre réplicas |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxys de confiance pour `X-Forwarded-For` (lu par uvicorn) |
+| `ENABLE_DOCS` | `false` | Documentation OpenAPI sur `/api/docs` |
+
+Une clé `SESSION_SECRET` se génère avec
+`python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`.
+Pour que Zimbra journalise et limite les connexions selon l'adresse réelle des utilisateurs
+(en-tête `X-Originating-IP` envoyé par le backend), déclarer le backend dans
+`zimbraMailTrustedIP`.
 
 Côté frontend, seule `BACKEND_URL` (défaut `http://localhost:8000`) est utilisée.
 
@@ -141,7 +180,8 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env   # renseigner les URLs Zimbra, COOKIE_SECURE=false en local
 .venv/bin/uvicorn app.main:app --reload --port 8000
-.venv/bin/pytest       # tests (avec un faux serveur Zimbra)
+.venv/bin/pytest --cov # tests (avec un faux serveur Zimbra), 95 % de couverture minimum
+.venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```
 
 Frontend :
@@ -150,7 +190,8 @@ Frontend :
 cd frontend
 npm install
 npm run dev            # http://localhost:3000, relaie /api vers http://localhost:8000
-npm run lint           # vérification TypeScript
+npm run lint           # ESLint et vérification TypeScript
+npm test               # tests Vitest (relais /api, utilitaires)
 ```
 
 ## Images Docker
@@ -179,17 +220,25 @@ helm install archivage charts/zimbra-archivage \
 ```
 
 L'ingress route `/api` vers le backend et le reste vers le frontend. Les annotations par
-défaut (ingress-nginx) désactivent la mise en tampon et allongent les délais, pour les
-exports volumineux. Voir `charts/zimbra-archivage/values.yaml` pour toutes les options.
+défaut (ingress-nginx) désactivent la mise en tampon, allongent les délais pour les
+exports volumineux et redirigent vers HTTPS. Avec `config.cookieSecure=true` (par défaut),
+le rendu échoue sans `ingress.tls`, sauf si `ingress.tlsTerminatedUpstream=true`.
+La clé des sessions est générée à l'installation et conservée dans un Secret (ou fournie par
+`session.secret` / `session.existingSecret`). `networkPolicy.enabled=true` restreint les accès
+au backend à l'ingress-controller et au frontend. Les valeurs sont vérifiées par
+`values.schema.json` ; voir `charts/zimbra-archivage/values.yaml` pour toutes les options.
 
 ## Publier une version
 
 Pousser un tag `vX.Y.Z`, ou lancer le workflow « Release » depuis l'onglet Actions
 en indiquant la version, déclenche `.github/workflows/release.yml`, qui :
 
-1. lance les tests du backend et la vérification TypeScript du frontend ;
-2. publie les images `:X.Y.Z` et `:latest` sur GHCR ;
+1. relance la CI (`.github/workflows/ci.yml`, aussi exécutée à chaque push et pull request :
+   tests et lint du backend, lint, tests et build du frontend, `helm lint`, audit des dépendances) ;
+2. publie les images `:X.Y.Z` sur GHCR, et `:latest` pour une version stable ;
 3. crée une release GitHub contenant le chart Helm `zimbra-archivage-X.Y.Z.tgz`.
+
+Une version avec suffixe (`vX.Y.Z-rc.1`) est publiée en prerelease et ne déplace pas `latest`.
 
 ```bash
 git tag v0.1.0

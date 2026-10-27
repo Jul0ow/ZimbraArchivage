@@ -1,0 +1,339 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "zimbra": {
+      "type": "object",
+      "properties": {
+        "soapUrl": {
+          "type": "string",
+          "pattern": "^(https?://.+)?$",
+          "description": "URL http(s), obligatoire au rendu"
+        },
+        "restUrl": {
+          "type": "string",
+          "pattern": "^(https?://.+)?$",
+          "description": "URL http(s), obligatoire au rendu"
+        },
+        "verifyTls": {
+          "type": "boolean"
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "zoneId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "searchBatchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "maxFileNameLength": {
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 180
+        },
+        "httpTimeout": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "downloadConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "maxConcurrentExports": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxExportsPerSession": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxAttachmentExtractionSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cookieSecure": {
+          "type": "boolean"
+        },
+        "sessionMaxAge": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "forwardedAllowIps": {
+          "type": "string"
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "secret": {
+          "type": "string"
+        },
+        "existingSecret": {
+          "type": "string"
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "image": {
+          "type": "object",
+          "required": [
+            "repository"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string"
+            },
+            "pullPolicy": {
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ]
+            }
+          }
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer"
+              ]
+            }
+          }
+        },
+        "resources": {
+          "type": "object"
+        },
+        "readinessProbe": {
+          "type": "object",
+          "properties": {
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "livenessProbe": {
+          "type": "object",
+          "properties": {
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "tmpSizeLimit": {
+          "type": "string"
+        }
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "image": {
+          "type": "object",
+          "required": [
+            "repository"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string"
+            },
+            "pullPolicy": {
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ]
+            }
+          }
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer"
+              ]
+            }
+          }
+        },
+        "resources": {
+          "type": "object"
+        },
+        "readinessProbe": {
+          "type": "object",
+          "properties": {
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "livenessProbe": {
+          "type": "object",
+          "properties": {
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "podSecurityContext": {
+      "type": "object"
+    },
+    "securityContext": {
+      "type": "object"
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tls": {
+          "type": "array"
+        },
+        "tlsTerminatedUpstream": {
+          "type": "boolean"
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressControllerSelector": {
+          "type": "object"
+        },
+        "zimbraEgress": {
+          "type": "array"
+        }
+      }
+    }
+  }
+}

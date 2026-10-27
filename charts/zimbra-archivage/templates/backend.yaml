@@ -17,6 +17,8 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
+      # L'application n'utilise pas l'API Kubernetes : pas de jeton monté dans le conteneur
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -32,17 +34,16 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "zimbra-archivage.backendName" . }}
+          env:
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "zimbra-archivage.sessionSecretName" . }}
+                  key: SESSION_SECRET
           ports:
             - name: http
               containerPort: {{ .Values.backend.port }}
-          readinessProbe:
-            httpGet:
-              path: /api/health
-              port: http
-          livenessProbe:
-            httpGet:
-              path: /api/health
-              port: http
+          {{- include "zimbra-archivage.probes" (dict "path" "/api/health" "values" .Values.backend) | nindent 10 }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
           volumeMounts:
@@ -51,32 +52,8 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
-      {{- with .Values.backend.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.backend.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.backend.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+          emptyDir:
+            sizeLimit: {{ .Values.backend.tmpSizeLimit }}
+      {{- include "zimbra-archivage.scheduling" .Values.backend | nindent 6 }}
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "zimbra-archivage.backendName" . }}
-  labels:
-    {{- include "zimbra-archivage.labels" . | nindent 4 }}
-    app.kubernetes.io/component: backend
-spec:
-  type: {{ .Values.service.type }}
-  selector:
-    {{- include "zimbra-archivage.selectorLabels" (dict "root" . "component" "backend") | nindent 4 }}
-  ports:
-    - name: http
-      port: {{ .Values.backend.port }}
-      targetPort: http
+{{ include "zimbra-archivage.service" (dict "root" . "component" "backend" "name" (include "zimbra-archivage.backendName" .) "values" .Values.backend) }}

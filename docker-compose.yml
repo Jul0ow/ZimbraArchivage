@@ -2,6 +2,8 @@
 #   cp .env.example .env    # puis renseigner les URLs du serveur Zimbra
 #   docker compose up -d    # images publiées ; ajouter --build pour construire depuis les sources
 #   ouvrir http://localhost:3000/
+# L'application n'est publiée que sur la boucle locale : elle est servie en HTTP, et les
+# mots de passe ne doivent pas circuler en clair sur le réseau.
 name: zimbra-archivage
 
 services:
@@ -13,11 +15,20 @@ services:
       ZIMBRA_REST_URL: ${ZIMBRA_REST_URL:?Renseigner ZIMBRA_REST_URL dans .env}
       VERIFY_TLS: ${VERIFY_TLS:-true}
       ZONE_ID: ${ZONE_ID:-Europe/Paris}
+      SEARCH_BATCH_SIZE: ${SEARCH_BATCH_SIZE:-500}
+      MAX_FILE_NAME_LENGTH: ${MAX_FILE_NAME_LENGTH:-50}
+      HTTP_TIMEOUT: ${HTTP_TIMEOUT:-120}
+      DOWNLOAD_CONCURRENCY: ${DOWNLOAD_CONCURRENCY:-4}
+      # Facultatif : sans clé, les sessions sont perdues au redémarrage du backend
+      SESSION_SECRET: ${SESSION_SECRET:-}
       # L'application est servie en HTTP sur le poste : le cookie ne peut pas être Secure
       COOKIE_SECURE: "false"
+      # Le backend n'est joignable que par le frontend, qui relaie l'adresse du navigateur
+      FORWARDED_ALLOW_IPS: "*"
     read_only: true
     tmpfs:
-      - /tmp
+      # En mémoire : taille bornée pour les .eml de plus de 10 Mo en cours de téléchargement
+      - /tmp:size=512m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
@@ -31,7 +42,7 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
     ports:
-      - "${ARCHIVAGE_PORT:-3000}:3000"
+      - "127.0.0.1:${ARCHIVAGE_PORT:-3000}:3000"
     read_only: true
     tmpfs:
       - /app/.next/cache

@@ -9,14 +9,34 @@ zimbra:
 config:
   # Fuseau horaire des filtres de dates et du nommage des fichiers .eml
   zoneId: Europe/Paris
-  # Nombre de messages par page de recherche Zimbra
+  # Nombre de messages par page de recherche Zimbra (1 à 1000)
   searchBatchSize: 500
   # Longueur maximale des noms de fichiers .eml (entre 50 et 180)
   maxFileNameLength: 50
   # Délai maximal d'un appel vers Zimbra, en secondes
   httpTimeout: 120
+  # Courriels téléchargés en parallèle par export (1 à 16)
+  downloadConcurrency: 4
+  # Exports et estimations simultanés, au total (par réplica) et par session
+  maxConcurrentExports: 6
+  maxExportsPerSession: 2
+  # Taille maximale (octets) d'un courriel dont les pièces jointes sont extraites
+  maxAttachmentExtractionSize: 26214400
   # Cookie de session réservé à HTTPS : à ne désactiver que sans TLS
   cookieSecure: true
+  # Durée maximale d'une session, en secondes
+  sessionMaxAge: 28800
+  # Proxys dont l'en-tête X-Forwarded-For est pris en compte (adresse IP réelle des
+  # utilisateurs pour la limite de tentatives de connexion). "*" convient quand seul
+  # l'ingress peut joindre le backend (networkPolicy.enabled)
+  forwardedAllowIps: "*"
+
+session:
+  # Clé de chiffrement des sessions (Fernet, 32 octets en base64 urlsafe). Vide : une clé est
+  # générée à l'installation et conservée dans un Secret lors des mises à jour.
+  secret: ""
+  # Secret existant contenant la clé (clé SESSION_SECRET), prioritaire sur session.secret
+  existingSecret: ""
 
 backend:
   replicaCount: 1
@@ -25,12 +45,29 @@ backend:
     tag: ""
     pullPolicy: IfNotPresent
   port: 8000
+  service:
+    type: ClusterIP
+  # Prévoir environ (concurrence × 10 Mo + 75 Mo d'analyse des pièces jointes) par export
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
+      ephemeral-storage: 256Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
+      ephemeral-storage: 2Gi
+  # Espace des .eml de plus de 10 Mo en cours de téléchargement
+  tmpSizeLimit: 1Gi
+  # La sonde de vie est plus tolérante que la sonde de disponibilité : un pod chargé
+  # ne doit pas être redémarré avec tous les exports en cours
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  livenessProbe:
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -42,12 +79,22 @@ frontend:
     tag: ""
     pullPolicy: IfNotPresent
   port: 3000
+  service:
+    type: ClusterIP
   resources:
     requests:
       cpu: 50m
       memory: 128Mi
     limits:
       memory: 256Mi
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  livenessProbe:
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -65,19 +112,36 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 
-service:
-  type: ClusterIP
-
 ingress:
   enabled: false
   className: ""
+  # Annotations propres à ingress-nginx : à adapter pour un autre contrôleur
   annotations:
-    # Exports volumineux : pas de mise en tampon et délai de lecture étendu (ingress-nginx)
+    # Exports volumineux : pas de mise en tampon et délai de lecture étendu
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   host: archivage.example.fr
+  # TLS obligatoire avec config.cookieSecure=true, sauf si terminé en amont (tlsTerminatedUpstream)
   tls: []
   #  - secretName: archivage-tls
   #    hosts:
   #      - archivage.example.fr
+  # TLS terminé par un équipement en amont de l'ingress (répartiteur de charge)
+  tlsTerminatedUpstream: false
+
+networkPolicy:
+  # Limite les accès au backend (ingress-controller et frontend) et ses sorties (DNS, Zimbra)
+  enabled: false
+  # Sélecteur des pods de l'ingress-controller, dans tous les namespaces
+  ingressControllerSelector:
+    namespaceSelector: {}
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: ingress-nginx
+  # Destinations autorisées pour le backend (serveur Zimbra), au format NetworkPolicy « to ».
+  # Vide : toutes les destinations sur les ports 443 et 80.
+  zimbraEgress: []
+  #  - ipBlock:
+  #      cidr: 10.0.0.10/32

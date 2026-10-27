@@ -1,4 +1,7 @@
 {{- if .Values.ingress.enabled }}
+{{- if and .Values.config.cookieSecure (not .Values.ingress.tls) (not .Values.ingress.tlsTerminatedUpstream) }}
+{{- fail "ingress.tls est obligatoire : sans HTTPS, le cookie Secure n'est pas posé et la connexion échoue (ingress.tlsTerminatedUpstream=true si TLS est terminé en amont)" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

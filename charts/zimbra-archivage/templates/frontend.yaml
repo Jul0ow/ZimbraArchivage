@@ -15,6 +15,8 @@ spec:
       labels:
         {{- include "zimbra-archivage.selectorLabels" (dict "root" . "component" "frontend") | nindent 8 }}
     spec:
+      # L'application n'utilise pas l'API Kubernetes : pas de jeton monté dans le conteneur
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -36,14 +38,7 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.frontend.port }}
-          readinessProbe:
-            httpGet:
-              path: /
-              port: http
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
+          {{- include "zimbra-archivage.probes" (dict "path" "/" "values" .Values.frontend) | nindent 10 }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           volumeMounts:
@@ -52,32 +47,8 @@ spec:
               mountPath: /app/.next/cache
       volumes:
         - name: next-cache
-          emptyDir: {}
-      {{- with .Values.frontend.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.frontend.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.frontend.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+          emptyDir:
+            sizeLimit: 256Mi
+      {{- include "zimbra-archivage.scheduling" .Values.frontend | nindent 6 }}
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "zimbra-archivage.frontendName" . }}
-  labels:
-    {{- include "zimbra-archivage.labels" . | nindent 4 }}
-    app.kubernetes.io/component: frontend
-spec:
-  type: {{ .Values.service.type }}
-  selector:
-    {{- include "zimbra-archivage.selectorLabels" (dict "root" . "component" "frontend") | nindent 4 }}
-  ports:
-    - name: http
-      port: {{ .Values.frontend.port }}
-      targetPort: http
+{{ include "zimbra-archivage.service" (dict "root" . "component" "frontend" "name" (include "zimbra-archivage.frontendName" .) "values" .Values.frontend) }}
