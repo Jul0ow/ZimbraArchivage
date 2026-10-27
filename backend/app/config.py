@@ -1,14 +1,17 @@
 """Configuration de l'application, lue depuis les variables d'environnement."""
 
 from functools import lru_cache
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Les valeurs refusées ne sont pas reprises dans les erreurs : l'URL du proxy peut contenir
+    # un mot de passe
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     # URL de l'API SOAP, de la forme https://domaine.com/service/soap
     zimbra_soap_url: str
@@ -25,6 +28,9 @@ class Settings(BaseSettings):
     http_timeout: float = Field(default=120.0, gt=0)
     # Vérifier le certificat TLS du serveur Zimbra
     verify_tls: bool = True
+    # Proxy HTTP(S) vers Zimbra, de la forme http://[utilisateur:mot_de_passe@]hôte:port.
+    # Vide : connexion directe, ou proxy des variables HTTPS_PROXY / HTTP_PROXY / NO_PROXY
+    zimbra_proxy_url: SecretStr = SecretStr("")
 
     # Nombre de courriels téléchargés en parallèle pendant un export
     download_concurrency: int = Field(default=4, ge=1, le=16)
@@ -54,6 +60,20 @@ class Settings(BaseSettings):
     @classmethod
     def strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("zimbra_proxy_url")
+    @classmethod
+    def check_proxy_url(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            return value
+        try:
+            url = urlsplit(value.get_secret_value())
+            url.port  # noqa: B018 - lève ValueError si le port n'est pas un nombre
+        except ValueError as e:
+            raise ValueError("URL de proxy invalide") from e
+        if url.scheme not in ("http", "https") or not url.hostname:
+            raise ValueError("URL de proxy invalide : attendu http(s)://[utilisateur:mot_de_passe@]hôte:port")
+        return value
 
     @field_validator("zone_id")
     @classmethod

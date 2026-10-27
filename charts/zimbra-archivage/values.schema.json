@@ -17,6 +17,23 @@
         },
         "verifyTls": {
           "type": "boolean"
+        },
+        "proxy": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^(https?://.+)?$",
+              "description": "URL http(s)://[utilisateur:mot_de_passe@]hôte:port"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },
@@ -339,6 +356,9 @@
           "type": "object"
         },
         "zimbraEgress": {
+          "type": "array"
+        },
+        "extraEgress": {
           "type": "array"
         }
       }

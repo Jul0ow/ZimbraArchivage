@@ -16,6 +16,9 @@ spec:
         {{- include "zimbra-archivage.selectorLabels" (dict "root" . "component" "backend") | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if and .Values.zimbra.proxy.url (not .Values.zimbra.proxy.existingSecret) }}
+        checksum/proxy: {{ include (print $.Template.BasePath "/proxy-secret.yaml") . | sha256sum }}
+        {{- end }}
     spec:
       # L'application n'utilise pas l'API Kubernetes : pas de jeton monté dans le conteneur
       automountServiceAccountToken: false
@@ -40,6 +43,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "zimbra-archivage.sessionSecretName" . }}
                   key: SESSION_SECRET
+            {{- with include "zimbra-archivage.proxySecretName" . }}
+            - name: ZIMBRA_PROXY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ if $.Values.zimbra.proxy.existingSecret }}{{ $.Values.zimbra.proxy.existingSecretKey }}{{ else }}ZIMBRA_PROXY_URL{{ end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.backend.port }}

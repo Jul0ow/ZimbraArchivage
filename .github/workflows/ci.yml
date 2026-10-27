@@ -65,3 +65,9 @@ jobs:
             --set ingress.enabled=true --set ingress.tls[0].secretName=tls \
             --set ingress.tls[0].hosts[0]=archivage.example.fr \
             --set networkPolicy.enabled=true > /dev/null
+          helm template test charts/zimbra-archivage $VALUES \
+            --set zimbra.proxy.url=http://user:pass@proxy.example.fr:3128 \
+            --set networkPolicy.enabled=true \
+            --set networkPolicy.extraEgress[0].ports[0].port=3128 > /dev/null
+          helm template test charts/zimbra-archivage $VALUES \
+            --set zimbra.proxy.existingSecret=proxy > /dev/null

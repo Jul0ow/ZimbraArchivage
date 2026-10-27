@@ -5,6 +5,14 @@ zimbra:
   restUrl: ""
   # Vérifier le certificat TLS du serveur Zimbra
   verifyTls: true
+  # Proxy HTTP(S) par lequel le backend joint Zimbra
+  proxy:
+    # URL du proxy, de la forme http://[utilisateur:mot_de_passe@]hôte:port, conservée dans un
+    # Secret. Vide : connexion directe
+    url: ""
+    # Secret existant contenant l'URL du proxy, prioritaire sur zimbra.proxy.url
+    existingSecret: ""
+    existingSecretKey: ZIMBRA_PROXY_URL
 
 config:
   # Fuseau horaire des filtres de dates et du nommage des fichiers .eml
@@ -148,3 +156,12 @@ networkPolicy:
   zimbraEgress: []
   #  - ipBlock:
   #      cidr: 10.0.0.10/32
+  # Autres sorties autorisées pour le backend, au format NetworkPolicy « egress », par exemple
+  # le proxy (zimbra.proxy) s'il écoute sur un autre port que 443 ou 80
+  extraEgress: []
+  #  - to:
+  #      - ipBlock:
+  #          cidr: 10.0.0.20/32
+  #    ports:
+  #      - port: 3128
+  #        protocol: TCP

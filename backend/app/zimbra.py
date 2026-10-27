@@ -231,6 +231,8 @@ def create_http_client(settings: Settings, transport: httpx.BaseTransport | None
         timeout=httpx.Timeout(settings.http_timeout, connect=10.0, pool=30.0),
         limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
         verify=settings.verify_tls,
+        # Un proxy configuré est prioritaire sur les variables d'environnement HTTP(S)_PROXY
+        proxy=settings.zimbra_proxy_url.get_secret_value() or None,
         transport=transport,
     )
 

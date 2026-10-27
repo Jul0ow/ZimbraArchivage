@@ -38,6 +38,15 @@ app.kubernetes.io/component: {{ .component }}
 {{- .Values.session.existingSecret | default (printf "%s-session" (include "zimbra-archivage.fullname" .)) }}
 {{- end }}
 
+{{/* Nom du Secret contenant l'URL du proxy vers Zimbra (vide sans proxy) */}}
+{{- define "zimbra-archivage.proxySecretName" -}}
+{{- if .Values.zimbra.proxy.existingSecret }}
+{{- .Values.zimbra.proxy.existingSecret }}
+{{- else if .Values.zimbra.proxy.url }}
+{{- printf "%s-proxy" (include "zimbra-archivage.fullname" .) }}
+{{- end }}
+{{- end }}
+
 {{/* Placement d'un pod : appeler avec la section du composant (.Values.backend ou .Values.frontend) */}}
 {{- define "zimbra-archivage.scheduling" -}}
 {{- with .nodeSelector }}

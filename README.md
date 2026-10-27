@@ -131,8 +131,9 @@ Puis ouvrir http://localhost:3000/. L'application n'est publiée que sur `127.0.
 est servie en HTTP, les mots de passe ne doivent pas circuler en clair sur le réseau.
 Options utiles dans `.env` : `ARCHIVAGE_VERSION` (version des images, `latest` = dernière
 version stable), `ARCHIVAGE_PORT` (port local, `3000` par défaut), `SESSION_SECRET` (pour
-garder les sessions après un redémarrage) et `VERIFY_TLS=false` si le certificat du serveur
-Zimbra est interne ou auto-signé.
+garder les sessions après un redémarrage), `VERIFY_TLS=false` si le certificat du serveur
+Zimbra est interne ou auto-signé et `ZIMBRA_PROXY_URL` si Zimbra n'est joignable que par un
+proxy.
 
 Pour tester les sources du dépôt plutôt que les images publiées :
 `docker compose up -d --build`. Arrêt : `docker compose down`.
@@ -150,6 +151,7 @@ Variables d'environnement (voir `backend/.env.example`) :
 | `MAX_FILE_NAME_LENGTH` | `50` | Longueur maximale des noms de `.eml` (50 à 180) |
 | `HTTP_TIMEOUT` | `120` | Délai maximal d'un appel à Zimbra (secondes ; 10 s pour établir la connexion) |
 | `VERIFY_TLS` | `true` | Vérification du certificat de Zimbra |
+| `ZIMBRA_PROXY_URL` | (vide) | Proxy HTTP(S) par lequel joindre Zimbra, ex. `http://utilisateur:mot_de_passe@proxy.domaine.fr:3128`. Prioritaire sur `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`, utilisées sinon |
 | `DOWNLOAD_CONCURRENCY` | `4` | Courriels téléchargés en parallèle par export (1 à 16) |
 | `MAX_CONCURRENT_EXPORTS` | `6` | Exports et estimations simultanés, pour tout le backend |
 | `MAX_EXPORTS_PER_SESSION` | `2` | Exports et estimations simultanés par session |
@@ -224,8 +226,11 @@ défaut (ingress-nginx) désactivent la mise en tampon, allongent les délais po
 exports volumineux et redirigent vers HTTPS. Avec `config.cookieSecure=true` (par défaut),
 le rendu échoue sans `ingress.tls`, sauf si `ingress.tlsTerminatedUpstream=true`.
 La clé des sessions est générée à l'installation et conservée dans un Secret (ou fournie par
-`session.secret` / `session.existingSecret`). `networkPolicy.enabled=true` restreint les accès
-au backend à l'ingress-controller et au frontend. Les valeurs sont vérifiées par
+`session.secret` / `session.existingSecret`). Un proxy vers Zimbra se configure avec
+`zimbra.proxy.url` (conservée dans un Secret) ou `zimbra.proxy.existingSecret`.
+`networkPolicy.enabled=true` restreint les accès au backend à l'ingress-controller et au
+frontend ; ses sorties vers un proxy qui n'écoute pas sur le port 443 ou 80 s'ajoutent avec
+`networkPolicy.extraEgress`. Les valeurs sont vérifiées par
 `values.schema.json` ; voir `charts/zimbra-archivage/values.yaml` pour toutes les options.
 
 ## Publier une version

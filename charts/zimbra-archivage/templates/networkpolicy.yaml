@@ -37,4 +37,7 @@ spec:
       to:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}

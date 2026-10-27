@@ -1,4 +1,9 @@
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 import httpx
+import pydantic
 import pytest
 
 from app.config import Settings
@@ -10,6 +15,7 @@ from app.zimbra import (
     ZimbraError,
     ZimbraUnavailable,
     _folder_color,
+    create_http_client,
 )
 from tests.fake_zimbra import REST_URL, SOAP_URL, VALID_TOKEN, FakeMessage, FakeZimbra
 
@@ -236,3 +242,69 @@ def test_pagination_is_stable_when_messages_arrive_or_move(settings: Settings):
 
     # Ni doublon ni message sauté
     assert found == ["0", "1", "2", "3", "4", "5", "9"]
+
+
+@pytest.fixture
+def proxy() -> Iterator[tuple[str, list[tuple[str, str | None]]]]:
+    """Proxy HTTP local qui note les requêtes reçues (URL absolue, en-tête Proxy-Authorization)."""
+    received: list[tuple[str, str | None]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            received.append((self.path, self.headers.get("Proxy-Authorization")))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"127.0.0.1:{server.server_address[1]}", received
+    server.shutdown()
+    server.server_close()
+
+
+def test_calls_go_through_the_configured_proxy(settings: Settings, proxy):
+    address, received = proxy
+    proxied = settings.model_copy(
+        update={"zimbra_proxy_url": pydantic.SecretStr(f"http://archivage:s3cr3t-proxy@{address}")}
+    )
+    with create_http_client(proxied) as http:
+        assert http.get("http://zimbra.invalid/service/home/~/?id=1").status_code == 200
+    # "archivage:s3cr3t-proxy" en base64
+    assert received == [
+        ("http://zimbra.invalid/service/home/~/?id=1", "Basic YXJjaGl2YWdlOnMzY3IzdC1wcm94eQ==")
+    ]
+
+
+@pytest.mark.parametrize(
+    "url", ["proxy:3128", "ftp://proxy:3128", "socks5://proxy:1080", "http://", "http://proxy:port"]
+)
+def test_invalid_proxy_url_is_rejected(url: str):
+    with pytest.raises(pydantic.ValidationError) as e:
+        Settings(_env_file=None, zimbra_soap_url=SOAP_URL, zimbra_rest_url=REST_URL, zimbra_proxy_url=url)
+    assert "URL de proxy invalide" in str(e.value)
+
+
+def test_proxy_password_is_not_in_validation_errors():
+    with pytest.raises(pydantic.ValidationError) as e:
+        Settings(
+            _env_file=None,
+            zimbra_soap_url=SOAP_URL,
+            zimbra_rest_url=REST_URL,
+            zimbra_proxy_url="ftp://archivage:s3cr3t-proxy@proxy:3128",
+        )
+    assert "s3cr3t-proxy" not in str(e.value)
+
+
+def test_proxy_password_is_not_in_settings_repr():
+    settings = Settings(
+        _env_file=None,
+        zimbra_soap_url=SOAP_URL,
+        zimbra_rest_url=REST_URL,
+        zimbra_proxy_url="http://archivage:s3cr3t-proxy@proxy:3128",
+    )
+    assert "s3cr3t-proxy" not in repr(settings)
