@@ -9,6 +9,7 @@ et EndSessionRequest à fermer la session Zimbra à la déconnexion.
 import logging
 import re
 import time
+import urllib.request
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -224,16 +225,33 @@ def _retry_delay(attempt: int, response: httpx.Response | None) -> float:
     return min(delay, MAX_RETRY_DELAY)
 
 
+def _proxy_mounts(settings: Settings, limits: httpx.Limits) -> dict[str, httpx.BaseTransport | None]:
+    """Transports passant par le proxy ZIMBRA_PROXY_URL, pour les URLs http et https.
+
+    Sans ZIMBRA_PROXY_URL, httpx applique lui-même HTTPS_PROXY, HTTP_PROXY et NO_PROXY.
+    Avec, ces transports remplacent ceux de HTTP(S)_PROXY, et les exclusions de NO_PROXY,
+    que httpx ajoute avec un motif d'hôte plus précis, restent prioritaires.
+    """
+    proxy_url = settings.zimbra_proxy_url.get_secret_value()
+    no_proxy = {host.strip() for host in urllib.request.getproxies().get("no", "").split(",")}
+    # NO_PROXY=* : aucun proxy (httpx ne garde alors aucune exclusion à faire prévaloir)
+    if not proxy_url or "*" in no_proxy:
+        return {}
+    # Connexions vers des URLs https par tunnel CONNECT, comme avec HTTPS_PROXY
+    proxy = httpx.HTTPTransport(proxy=proxy_url, verify=settings.verify_tls, limits=limits)
+    return {"http://": proxy, "https://": proxy}
+
+
 def create_http_client(settings: Settings, transport: httpx.BaseTransport | None = None) -> httpx.Client:
     """Client HTTP partagé : les connexions TLS vers Zimbra sont réutilisées d'un appel à l'autre."""
+    limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
     return httpx.Client(
         # Un serveur injoignable est détecté vite, sans attendre le délai de lecture
         timeout=httpx.Timeout(settings.http_timeout, connect=10.0, pool=30.0),
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        limits=limits,
         verify=settings.verify_tls,
-        # Un proxy configuré est prioritaire sur les variables d'environnement HTTP(S)_PROXY
-        proxy=settings.zimbra_proxy_url.get_secret_value() or None,
         transport=transport,
+        mounts=_proxy_mounts(settings, limits) if transport is None else None,
     )
 
 

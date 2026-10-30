@@ -13,6 +13,8 @@ zimbra:
     # Secret existant contenant l'URL du proxy, prioritaire sur zimbra.proxy.url
     existingSecret: ""
     existingSecretKey: ZIMBRA_PROXY_URL
+    # Hôtes joints sans passer par le proxy (variable NO_PROXY), ex. "mail.domaine.fr,.interne"
+    noProxy: ""
 
 config:
   # Fuseau horaire des filtres de dates et du nommage des fichiers .eml

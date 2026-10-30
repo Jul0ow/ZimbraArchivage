@@ -32,6 +32,9 @@
             "existingSecretKey": {
               "type": "string",
               "minLength": 1
+            },
+            "noProxy": {
+              "type": "string"
             }
           }
         }

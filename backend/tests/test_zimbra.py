@@ -244,40 +244,143 @@ def test_pagination_is_stable_when_messages_arrive_or_move(settings: Settings):
     assert found == ["0", "1", "2", "3", "4", "5", "9"]
 
 
+# Variables de proxy lues par httpx (et urllib), en majuscules et en minuscules
+PROXY_ENV_VARS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"]
+PROXY_PASSWORD = "s3cr3t-proxy"
+
+
+class Recorder:
+    """Serveur HTTP local qui note les requêtes reçues : sert de proxy ou de serveur Zimbra."""
+
+    def __init__(self) -> None:
+        # (méthode, cible, en-tête Proxy-Authorization)
+        self.received: list[tuple[str, str, str | None]] = []
+        recorder = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def _record(self, status: int) -> None:
+                recorder.received.append((self.command, self.path, self.headers.get("Proxy-Authorization")))
+                self.send_response(status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def do_GET(self) -> None:
+                self._record(200)
+
+            def do_CONNECT(self) -> None:
+                # Tunnel refusé : suffit à vérifier que les URLs https passent par CONNECT
+                self._record(403)
+
+            def log_message(self, *args: object) -> None:
+                pass
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.address = f"127.0.0.1:{self._server.server_address[1]}"
+        threading.Thread(target=self._server.serve_forever, args=(0.01,), daemon=True).start()
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
 @pytest.fixture
-def proxy() -> Iterator[tuple[str, list[tuple[str, str | None]]]]:
-    """Proxy HTTP local qui note les requêtes reçues (URL absolue, en-tête Proxy-Authorization)."""
-    received: list[tuple[str, str | None]] = []
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            received.append((self.path, self.headers.get("Proxy-Authorization")))
-            self.send_response(200)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-        def log_message(self, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield f"127.0.0.1:{server.server_address[1]}", received
-    server.shutdown()
-    server.server_close()
+def proxy_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    """Environnement sans variable de proxy, à compléter par le test."""
+    for name in PROXY_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    return monkeypatch
 
 
-def test_calls_go_through_the_configured_proxy(settings: Settings, proxy):
-    address, received = proxy
-    proxied = settings.model_copy(
-        update={"zimbra_proxy_url": pydantic.SecretStr(f"http://archivage:s3cr3t-proxy@{address}")}
-    )
-    with create_http_client(proxied) as http:
+@pytest.fixture
+def proxy(proxy_env) -> Iterator[Recorder]:
+    recorder = Recorder()
+    yield recorder
+    recorder.close()
+
+
+@pytest.fixture
+def direct_server() -> Iterator[Recorder]:
+    recorder = Recorder()
+    yield recorder
+    recorder.close()
+
+
+def with_proxy(settings: Settings, proxy: Recorder) -> Settings:
+    url = f"http://archivage:{PROXY_PASSWORD}@{proxy.address}"
+    return settings.model_copy(update={"zimbra_proxy_url": pydantic.SecretStr(url)})
+
+
+def test_calls_go_through_the_configured_proxy(settings: Settings, proxy: Recorder):
+    with create_http_client(with_proxy(settings, proxy)) as http:
         assert http.get("http://zimbra.invalid/service/home/~/?id=1").status_code == 200
     # "archivage:s3cr3t-proxy" en base64
-    assert received == [
-        ("http://zimbra.invalid/service/home/~/?id=1", "Basic YXJjaGl2YWdlOnMzY3IzdC1wcm94eQ==")
+    assert proxy.received == [
+        ("GET", "http://zimbra.invalid/service/home/~/?id=1", "Basic YXJjaGl2YWdlOnMzY3IzdC1wcm94eQ==")
     ]
+
+
+def test_https_goes_through_a_connect_tunnel_and_proxy_errors_are_retried(
+    settings: Settings, proxy: Recorder, caplog: pytest.LogCaptureFixture
+):
+    sleeps: list[float] = []
+    client = ZimbraClient(with_proxy(settings, proxy), sleep=sleeps.append)
+
+    with pytest.raises(ZimbraUnavailable):
+        client.get_account_name(VALID_TOKEN)
+
+    # SOAP_URL est en https : tunnel vers zimbra.test:443, authentifié auprès du proxy
+    assert {(method, target) for method, target, _ in proxy.received} == {("CONNECT", "zimbra.test:443")}
+    assert all(auth is not None for _, _, auth in proxy.received)
+    assert len(proxy.received) == MAX_RETRIES + 1
+    assert sleeps == [1, 2, 4, 8, 16]
+    assert "Erreur de connexion avec Zimbra" in caplog.text
+    assert PROXY_PASSWORD not in caplog.text
+
+
+def test_unreachable_proxy_is_retried(settings: Settings, proxy_env, caplog: pytest.LogCaptureFixture):
+    closed = Recorder()
+    closed.close()
+    sleeps: list[float] = []
+    client = ZimbraClient(with_proxy(settings, closed), sleep=sleeps.append)
+
+    with pytest.raises(ZimbraUnavailable, match="injoignable"):
+        client.get_account_name(VALID_TOKEN)
+
+    assert len(sleeps) == MAX_RETRIES
+    assert PROXY_PASSWORD not in caplog.text
+
+
+@pytest.mark.parametrize("name", ["HTTP_PROXY", "http_proxy"])
+def test_proxy_environment_variables_are_used(settings: Settings, proxy: Recorder, proxy_env, name: str):
+    proxy_env.setenv(name, f"http://{proxy.address}")
+    with create_http_client(settings) as http:
+        http.get("http://zimbra.invalid/service/home/~/?id=1")
+    assert [target for _, target, _ in proxy.received] == ["http://zimbra.invalid/service/home/~/?id=1"]
+
+
+@pytest.mark.parametrize("no_proxy", ["127.0.0.1", "zimbra.invalid,127.0.0.1", "*"])
+@pytest.mark.parametrize("configured", [True, False], ids=["ZIMBRA_PROXY_URL", "HTTP_PROXY"])
+def test_no_proxy_exclusions_are_respected(
+    settings: Settings, proxy: Recorder, direct_server: Recorder, proxy_env, no_proxy: str, configured: bool
+):
+    if configured:
+        settings = with_proxy(settings, proxy)
+    else:
+        proxy_env.setenv("HTTP_PROXY", f"http://{proxy.address}")
+    proxy_env.setenv("NO_PROXY", no_proxy)
+
+    with create_http_client(settings) as http:
+        assert http.get(f"http://{direct_server.address}/service/home/~/?id=1").status_code == 200
+
+    assert proxy.received == []
+    assert [target for _, target, _ in direct_server.received] == ["/service/home/~/?id=1"]
+
+
+def test_direct_connection_without_proxy(settings: Settings, proxy_env, direct_server: Recorder):
+    with create_http_client(settings) as http:
+        assert http.get(f"http://{direct_server.address}/x").status_code == 200
+    assert [target for _, target, _ in direct_server.received] == ["/x"]
 
 
 @pytest.mark.parametrize(
@@ -295,9 +398,9 @@ def test_proxy_password_is_not_in_validation_errors():
             _env_file=None,
             zimbra_soap_url=SOAP_URL,
             zimbra_rest_url=REST_URL,
-            zimbra_proxy_url="ftp://archivage:s3cr3t-proxy@proxy:3128",
+            zimbra_proxy_url=f"ftp://archivage:{PROXY_PASSWORD}@proxy:3128",
         )
-    assert "s3cr3t-proxy" not in str(e.value)
+    assert PROXY_PASSWORD not in str(e.value)
 
 
 def test_proxy_password_is_not_in_settings_repr():
@@ -305,6 +408,6 @@ def test_proxy_password_is_not_in_settings_repr():
         _env_file=None,
         zimbra_soap_url=SOAP_URL,
         zimbra_rest_url=REST_URL,
-        zimbra_proxy_url="http://archivage:s3cr3t-proxy@proxy:3128",
+        zimbra_proxy_url=f"http://archivage:{PROXY_PASSWORD}@proxy:3128",
     )
-    assert "s3cr3t-proxy" not in repr(settings)
+    assert PROXY_PASSWORD not in repr(settings)

@@ -67,6 +67,7 @@ jobs:
             --set networkPolicy.enabled=true > /dev/null
           helm template test charts/zimbra-archivage $VALUES \
             --set zimbra.proxy.url=http://user:pass@proxy.example.fr:3128 \
+            --set zimbra.proxy.noProxy=localhost \
             --set networkPolicy.enabled=true \
             --set networkPolicy.extraEgress[0].ports[0].port=3128 > /dev/null
           helm template test charts/zimbra-archivage $VALUES \

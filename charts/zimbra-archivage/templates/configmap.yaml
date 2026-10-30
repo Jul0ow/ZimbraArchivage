@@ -8,6 +8,9 @@ data:
   ZIMBRA_SOAP_URL: {{ required "zimbra.soapUrl est obligatoire" .Values.zimbra.soapUrl | quote }}
   ZIMBRA_REST_URL: {{ required "zimbra.restUrl est obligatoire" .Values.zimbra.restUrl | quote }}
   VERIFY_TLS: {{ .Values.zimbra.verifyTls | quote }}
+  {{- with .Values.zimbra.proxy.noProxy }}
+  NO_PROXY: {{ . | quote }}
+  {{- end }}
   ZONE_ID: {{ .Values.config.zoneId | quote }}
   SEARCH_BATCH_SIZE: {{ .Values.config.searchBatchSize | quote }}
   MAX_FILE_NAME_LENGTH: {{ .Values.config.maxFileNameLength | quote }}

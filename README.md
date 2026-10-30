@@ -151,7 +151,8 @@ Variables d'environnement (voir `backend/.env.example`) :
 | `MAX_FILE_NAME_LENGTH` | `50` | Longueur maximale des noms de `.eml` (50 à 180) |
 | `HTTP_TIMEOUT` | `120` | Délai maximal d'un appel à Zimbra (secondes ; 10 s pour établir la connexion) |
 | `VERIFY_TLS` | `true` | Vérification du certificat de Zimbra |
-| `ZIMBRA_PROXY_URL` | (vide) | Proxy HTTP(S) par lequel joindre Zimbra, ex. `http://utilisateur:mot_de_passe@proxy.domaine.fr:3128`. Prioritaire sur `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`, utilisées sinon |
+| `ZIMBRA_PROXY_URL` | (vide) | Proxy HTTP(S) par lequel joindre Zimbra, ex. `http://utilisateur:mot_de_passe@proxy.domaine.fr:3128`. Prioritaire sur `HTTPS_PROXY` / `HTTP_PROXY` (ou `https_proxy` / `http_proxy`), utilisées sinon |
+| `NO_PROXY` | (vide) | Hôtes joints sans proxy, séparés par des virgules (`mail.domaine.fr`, `.domaine.fr`, `10.0.0.1`, `*`), aussi avec `ZIMBRA_PROXY_URL` |
 | `DOWNLOAD_CONCURRENCY` | `4` | Courriels téléchargés en parallèle par export (1 à 16) |
 | `MAX_CONCURRENT_EXPORTS` | `6` | Exports et estimations simultanés, pour tout le backend |
 | `MAX_EXPORTS_PER_SESSION` | `2` | Exports et estimations simultanés par session |
@@ -163,6 +164,11 @@ Variables d'environnement (voir `backend/.env.example`) :
 | `SESSION_SECRET` | (aléatoire) | Clé Fernet de chiffrement des sessions ; sans elle, les sessions sont perdues au redémarrage et non partagées entre réplicas |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxys de confiance pour `X-Forwarded-For` (lu par uvicorn) : adresses de l'ingress-controller, jamais `*` |
 | `ENABLE_DOCS` | `false` | Documentation OpenAPI sur `/api/docs` |
+
+Avec un proxy, tous les appels à Zimbra (SOAP et ReST) passent par lui, les URLs `https` par un
+tunnel `CONNECT` : le certificat vérifié reste celui de Zimbra. Un proxy injoignable ou qui refuse
+la connexion est traité comme un Zimbra injoignable (mêmes nouvelles tentatives). L'URL du proxy
+n'apparaît ni dans les journaux ni dans les erreurs de configuration.
 
 Une clé `SESSION_SECRET` se génère avec
 `python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`.
@@ -227,7 +233,8 @@ exports volumineux et redirigent vers HTTPS. Avec `config.cookieSecure=true` (pa
 le rendu échoue sans `ingress.tls`, sauf si `ingress.tlsTerminatedUpstream=true`.
 La clé des sessions est générée à l'installation et conservée dans un Secret (ou fournie par
 `session.secret` / `session.existingSecret`). Un proxy vers Zimbra se configure avec
-`zimbra.proxy.url` (conservée dans un Secret) ou `zimbra.proxy.existingSecret`.
+`zimbra.proxy.url` (conservée dans un Secret) ou `zimbra.proxy.existingSecret`, et ses
+exclusions avec `zimbra.proxy.noProxy`.
 `networkPolicy.enabled=true` restreint les accès au backend à l'ingress-controller et au
 frontend ; ses sorties vers un proxy qui n'écoute pas sur le port 443 ou 80 s'ajoutent avec
 `networkPolicy.extraEgress`. Les valeurs sont vérifiées par
