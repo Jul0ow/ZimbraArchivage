@@ -23,6 +23,6 @@
     "eslint": "10.13.0",
     "eslint-config-next": "16.4.3",
     "typescript": "npm:@typescript/typescript6@6.0.2",
-    "vitest": "5.0.5"
+    "vitest": "5.1.0"
   }
 }
